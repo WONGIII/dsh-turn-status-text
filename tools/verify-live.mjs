@@ -13,15 +13,16 @@
  *   node tools/verify-live.mjs --clear           # drop both overrides
  *
  * It answers the one question the browser cannot be asked from a terminal: is
- * this plugin's settings namespace actually served (and therefore is its card
- * dispatched in Settings -> Plugins -> 可配置)? The secret is never printed.
+ * this plugin's settings entry actually served (and therefore does its card
+ * appear in the sidebar's Plugins page)? The secret is never printed.
  */
 import { createHash, createHmac } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-const NS = 'turn-status-text'
+/** Settings entry: the id of the Loader row cordis.patch.yml inserts. */
+const NS = 'dsh-turn-status-text'
 const FIELD = 'text'
 const COLOR_FIELD = 'color'
 const base = process.env.DSH_WEB_URL ?? 'http://127.0.0.1:3080'
@@ -96,7 +97,7 @@ if (mode === '--set' || mode === '--clear' || mode === '--color') {
   for (const entry of namespaces) console.log(' -', entry.ns)
   const mine = namespaces.find(entry => entry.ns === NS)
   console.log(mine === undefined
-    ? 'MISSING: ' + NS + ' is not served (the card would not be dispatched)'
+    ? 'MISSING: ' + NS + ' is not served (no settings entry, so no card in the Plugins page)'
     : 'OK: ' + NS + ' is served -> ' + JSON.stringify(mine.value ?? null))
   if (mine === undefined) process.exitCode = 1
 }

@@ -24,7 +24,7 @@
 | 颜色 | 填颜色代码 `#4d6bfe` 或 `#abc`。整行统一上色——文字、左边的小鲸鱼、以及文字的流光都跟着走（原理见下）。 |
 | 恢复默认 | 每个字段各有一个：把草稿清空再保存，文字回到部署原文案，颜色回到主题色。 |
 
-改动存在 `$DSH_HOME/settings.yaml` 的 `turn-status-text:` 段里，跨浏览器、重启后仍在；
+改动存在 dsh 的设置文档（`$DSH_HOME/settings.yaml`）里，段名就是这一行的 row id `dsh-turn-status-text:`，跨浏览器、重启后仍在；
 插件不联网，也不注册任何给模型看的内容。
 
 只改**「进行中」那行**。一轮结束后的「已完成，用时 …」「处理失败」等等保持原样。
@@ -175,11 +175,11 @@ dsh-turn-status-text/
 ├── package.json          # dsh.bundle.patch / dsh.client.platform = web；exports["./client"] → 浏览器 bundle
 ├── cordis.patch.yml      # bundle 层：insert 一行 dsh-turn-status-text
 ├── lib/
-│   ├── host.js           # host 半侧：注册设置命名空间 turn-status-text（text + color）
+│   ├── host.js           # host 半侧：声明设置入口行的 Config（row id dsh-turn-status-text，text + color，volatile）
 │   ├── index.js          # 包入口（package.json main）：re-export ./host.js
-│   └── client.js         # 浏览器半侧：改文案 + 上色 + 配置卡片
+│   └── client.js         # 浏览器半侧：改文案 + 上色 + 插件页配置卡片
 ├── tools/
-│   ├── selfcheck.mjs     # headless 自检（假 DOM + 假 LocaleRuntime/SettingsScope 跑真实 bundle）
+│   ├── selfcheck.mjs     # headless 自检（假 DOM + 假 LocaleRuntime/ConfigForms 跑真实 bundle）
 │   ├── verify-live.mjs   # 向运行中的实例查询/写入设置命名空间
 │   ├── live-probe.mjs    # 无依赖 CDP 探针：在真实页面里读状态行的文字与计算颜色，可截图
 │   ├── preview.mjs       # 渲染一张卡片对照页（浅色/深色）

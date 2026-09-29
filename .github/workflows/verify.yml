@@ -22,7 +22,7 @@ jobs:
           for file in tools/*.mjs; do node --check "$file"; done
       - name: Browser half self-check
         run: node tools/selfcheck.mjs
-      - name: Host half loads and declares its settings namespace
+      - name: Host half loads and declares its settings entry
         run: |
           npm install --no-save --ignore-scripts @deepseek-ai/schemastery@3.18.4
-          node --input-type=module -e "const m = await import('./lib/index.js'); if (m.NS !== 'turn-status-text' || typeof m.apply !== 'function') throw new Error('bad host half'); console.log('host half ok:', m.name)"
+          node --input-type=module -e "const m = await import('./lib/index.js'); const refs = Object.values(m.Config.toJSON().refs ?? {}); const volatile = refs.filter((s) => s.meta?.volatile === true).length; if (m.NS !== 'dsh-turn-status-text' || typeof m.apply !== 'function' || volatile < 2) throw new Error('bad host half: ' + JSON.stringify(m.Config.toJSON())); console.log('host half ok:', m.name, m.NS, 'volatile fields:', volatile)"

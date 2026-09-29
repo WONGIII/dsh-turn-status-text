@@ -64,19 +64,17 @@ dsh plugin --profile <你的 profile> remove @dsh-external/dsh-turn-status-text
 
 ## 怎么改
 
-**1. 图形界面（推荐）**：**侧栏「插件」页 →（已安装 / Installed）→ 找到本插件 → 配置**。
-本插件的卡片「状态文案」就在插件页的配置列表里，展开是两个输入框：自定义文字、文字颜色。
+**1. 插件页里配置（推荐）**：**侧栏「插件」→ 在插件列表里点开本插件 → 点这一行那个带 › 的标题（即「配置 @dsh-external/dsh-turn-status-text」）** → 两个输入框：自定义文字、文字颜色 → 保存。
 
-> 0.2.0-rc 的插件配置已经不在"设置 → 插件 → 可配置"里了：那个标签页与它 dispatch 的 `settings.plugin.item` 槽位在新版里已经不存在，
-> 现在由插件页自己承载——配置卡片注册进插件页的 `plugins.item` 槽位，设置值走 `configForms` 服务，
-> 表单用平台自己的 `SettingsFormModel` / `SettingsForm` / `SettingsValueField`。
-> 同一个 `text` / `color` 也出现在插件页里该 row 的配置页上（row 的 Config 就是设置分区），两处改的是同一份值。
+![插件页里的配置页](docs/plugins-config.png)
 
-卡片用的是平台自己的设置表单（`SettingsFormModel` + `SettingsForm` + `SettingsValueField`，都来自 `@deepseek-ai/dsh-client-ui-primitives`）：
-同边框/圆角/背景层、同字号间距、hover 与 focus-visible 状态、同一个「已覆盖」徽章与「恢复默认」控件、同一套「保存 / 放弃修改 / 本部署的设置为只读。」文案，
-连表单框架的标签集都是这套组件自带的——所以它和部署自带的设置页长得完全一样，主题（浅色/深色）也由平台负责。
+> 0.2.0-rc 的插件配置已经不在"设置 → 插件 → 可配置"里了：那个标签页与它 dispatch 的 `settings.plugin.item` 槽位在新版里已经不存在。
+> 现在插件页只给**注册了配置页的行**一个配置入口：`plugins.row.config` 槽位，key 是 `<包名>#<row id>`，
+> 也就是 `@dsh-external/dsh-turn-status-text#dsh-turn-status-text`（`ui-plugin-manager` 里的 `rowConfigKey()` / `configure.has(row)`）。
+> 设置值走 `configForms` 服务（`configForms.get(row id)`，`whileServed` 守卫），表单用平台自己的
+> `SettingsFormModel` / `SettingsForm` / `SettingsValueField`，所以这一页和部署自带的设置页长得一模一样。
 
-两个字段都声明为 `volatile()`，所以改完保存**立即生效、不用重启也不用刷新**。
+两个字段都是这一行 Config 上的 `volatile()` 字段，保存后**立即生效，不用重启也不用刷新页面**。
 
 **2. 临时覆盖（DevTools 控制台，只在当前页面生效，优先级高于设置）**：
 
@@ -135,31 +133,35 @@ const label = startTime === undefined
 用 `/\.([A-Za-z0-9_-]*_turnStatus)(?![\w-])/` 找出真实类名，再用同样的渐变几何重建一条规则，
 `<style>` 元素上带 `data-plugin-css="dsh-turn-status-text"`，卸载时移除。颜色留空时规则内容为空字符串，等于完全不干预部署样式。
 
-### 配置卡片
+### 配置页
 
 **设置项就是这一行的 Config**：`cordis.patch.yml` 里 `- id: dsh-turn-status-text` 这个 row id 就是设置条目的 key，
-Host 把 row 的 Config schema 投影成设置分区（`settings/describe` 里的一个 namespace），插件页据此渲染表单——
-所以不需要任何 `settings.register` 之类的注册调用，三方（Host 投影、插件页表单、浏览器半侧读取）天然对齐同一个 id。
+Host 把 row 的 Config schema 投影成设置分区（`settings/describe` 里的一个 namespace），所以不需要任何 `settings.register` 之类的注册调用，
+三方（Host 投影、插件页表单、浏览器半侧读取）天然对齐同一个 id。
 
 两个字段都带 `volatile()`：`volatile` 是"值可以在不重新挂载这个 row 的前提下被改，并且读到的始终是最新值"，
-SettingsForm 因此把它放进可编辑表单；空串默认值表示"继承"（部署原文案 / 主题原色）。
+插件页因此把它放进可编辑表单；空串默认值表示"继承"（部署原文案 / 主题原色）。
 
-浏览器半侧的读与写都走平台服务：
+**但设置分区被提供 ≠ 插件页会给出入口**：插件页只给注册过 `plugins.row.config` 的行渲染那个带 › 的「配置」标题，
+key 必须是 `<包名>#<row id>`。所以浏览器半侧要做的第二件事就是这个注册：
 
 ```js
-const inject = ['slots', 'locale']                      // 必需服务：只有这两个
-ctx.inject(['configForms', 'slots'], (scoped) => {      // 设置表单可选：没有它标签覆盖照常工作
-  scope = scoped.configForms.get('dsh-turn-status-text') // ConfigFormController：getSnapshot/ subscribe/ set/ mutate
-  const card = new TurnStatusTextCardController(scope)   // 包住平台的 SettingsFormModel
-  scoped.configForms.whileServed([NS], () => scoped.slots.inject('plugins.item', () => scoped.slots.register({
-    name: 'plugins.item', id: NS, order: 20, label: () => t('title'), locale: CARD_NS,
-    inject: () => card.inject(),                         // { hooks, edit, resetField, discard, save }
+const inject = ['slots', 'locale']                       // 必需服务：只有这两个
+ctx.inject(['configForms', 'slots'], (scoped) => {       // 设置表单可选：没有它标签覆盖照常工作
+  scope = scoped.configForms.get('dsh-turn-status-text')  // ConfigFormController：getSnapshot/ subscribe/ set/ mutate
+  const card = new TurnStatusTextCardController(scope)    // 包住平台的 SettingsFormModel
+  scoped.configForms.whileServed([NS], () => scoped.slots.inject('plugins.row.config', () => scoped.slots.register({
+    name: 'plugins.row.config',
+    key: '@dsh-external/dsh-turn-status-text#dsh-turn-status-text',
+    locale: CARD_NS,
+    inject: () => card.inject(),                          // { hooks, edit, resetField, discard, save }
   }, TurnStatusTextCard)))
 })
 ```
 
-`whileServed` 是平台提供的"只在 Host 真的提供这个设置条目时才挂卡片"的守卫：没组合这一行的部署里，插件页看不到这张卡片的任何痕迹。
-暂存/保存/放弃/恢复默认由平台表单模型负责，插件只把 scope 交给它、并把自己投影成组件要读的 snapshot。
+`whileServed` 是平台提供的"只在 Host 真的提供这个设置条目时才挂这一页"的守卫：没组合这一行的部署里，插件页看不到任何痕迹。
+行配置页会以 `view: 'page'` 调用组件（行列表里的摘要行是 `view: 'summary'`），平台同时还会传一个 `form`（`{state, mutate}`）进来；
+本插件用自己包好的 `SettingsFormModel`（同一份 `configForms` scope），因此暂存/保存/放弃/恢复默认的语义与部署自带设置页完全一致。
 
 ### 颜色规则为什么这样写
 
@@ -219,7 +221,8 @@ node tools/hmr-probe.mjs 15
 颜色归一化（`#ABC` → `#aabbcc`、`4d6bfe` → `#4d6bfe`、`red`/`#12345` 拒绝）、
 两个属性选择器与旧版 `_turnStatus` 渐变规则的**精确 CSS 文本**、页面全局覆盖与回退、
 `configForms.get(row id)` 的绑定、`whileServed` 守卫（没提供这个设置条目时不挂卡片）、
-卡片投影与表单动作的注入、字段编辑/恢复默认经平台表单保存后落到设置并渲染到状态行、
+`plugins.row.config` 的槽位与 `<包名>#<row id>` key、摘要/整页两种 view、
+表单状态与动作的注入、字段编辑/恢复默认经平台表单保存后落到设置并渲染到状态行、
 没有 `mutate` 的 scope 退回 `set`/`unset`、清理后样式元素与词典都被移除。
 
 `verify-live.mjs` 用本机 `$DSH_HOME/.credentials.yaml` 里的 browser-session 密钥签一个 loopback 页面 cookie，
@@ -262,17 +265,36 @@ node tools/hmr-probe.mjs 15
 
 即 `docs/after-duration.png`：文字是自定义的，用时仍是实时的。
 
-设置卡片本身要求 Host 真的提供这个设置条目（`whileServed` 守卫）。本机这个 DSH 进程是在插件装好之前启动的，
-设置目录在启动时就组合好了，所以**卡片要重启一次 DSH 才会出现**；重启前两条效果路径（文案 / 颜色）用上面的页面全局即可验证，
-而卡片那半边由 `selfcheck.mjs` 用与线上同形的 `ConfigForms`（含 `get`/`whileServed`/`mutate`）和平台设置表单的同一组接口
-（`SettingsFormModel.shell/field/bind/actions/dispose`）跑过：注册时机、投影字段、编辑、恢复默认、保存落库、未提供条目时不挂卡片。
+### 在插件页里配置的整条闭环（实测）
+
+重启 DSH 后，设置条目被正常提供（`node tools/verify-live.mjs` →
+
+```
+OK: dsh-turn-status-text is served -> {"text":"","color":""}
+```
+
+），然后用 headless Chromium 走了一遍真实 UI：
+
+1. 侧栏 **插件** → 插件列表里点开 `@dsh-external/dsh-turn-status-text`；
+2. 该行标题变成带 › 的按钮，`aria-label="配置 @dsh-external/dsh-turn-status-text"`（没有 `plugins.row.config` 注册时它只是纯文本）；
+3. 点开 → 这一页渲染出 **自定义文字** / **文字颜色** 两个字段；
+4. 填入 `宝宝正在努力思考… {duration}` 与 `#ff5500`，点 **保存**；
+5. 回到会话读状态行：
+
+```
+{"found":true,"rowClass":"xz4KEq_running","text":"宝宝正在努力思考…宝宝正在努力思考… 6分43秒",
+ "rowColor":"rgb(255, 85, 0)","deepDivingVar":"#ff5500","shimmerVar":"#ff5500"}
+```
+
+前半段是 `aria-live` 播报、后半段是可见那行；配置页见 `docs/plugins-config.png`。
+也就是说：**从插件页保存 → 聊天区那行立刻按你的文字和颜色渲染**，全程不需要刷新。
 
 ## 兼容性
 
 | 部署 | 文案键 | 上色锚点 | 设置条目 | 支持 |
 | --- | --- | --- | --- | --- |
-| 0.2.0-rc（当前桌面端） | `chat.deepDiving` / `chat.deepDivingFor` | `[data-chat-running]` | row id `dsh-turn-status-text` + `configForms` | ✅ 实测（文案/颜色；卡片见下） |
-| 0.1.7-rc | `message.turnProcess.deepDivingFor` | `[data-turn-process]` | 旧版 `settingsScope` 服务 | ⚠️ 文案/颜色可用，设置卡片按 0.2.0-rc 契约实现 |
+| 0.2.0-rc（当前桌面端） | `chat.deepDiving` / `chat.deepDivingFor` | `[data-chat-running]` | row id `dsh-turn-status-text` + `configForms` + `plugins.row.config` | ✅ 全链路实测 |
+| 0.1.7-rc | `message.turnProcess.deepDivingFor` | `[data-turn-process]` | 旧版 `settingsScope` 服务 | ⚠️ 文案/颜色可用，配置页按 0.2.0-rc 契约实现 |
 | 0.1.7 之前 | `chat.deepDiving` | `.<hash>_turnStatus`（运行时发现） | 同上 | ⚠️ 同上 |
 
 host 半侧依赖 `@deepseek-ai/schemastery@^3.18.4`（harness 自带同版本）；不声明 `prepare`，git 安装无需放行构建脚本。

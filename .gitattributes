@@ -1,0 +1,7 @@
+# Normalise to LF in the repository. Everything here is plain text; without this a
+# Windows checkout rewrites every file and the diff noise hides real changes.
+* text=auto eol=lf
+
+# Binary.
+*.png binary
+*.tgz binary

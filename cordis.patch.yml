@@ -1,0 +1,7 @@
+# dsh-turn-status-text bundle patch: mounts the plugin into a profile layer stack.
+# The host half only owns the settings namespace; the browser half rewrites the
+# chat running-status copy and its colour. A profile may still override this row in
+# its own patch file with the same id.
+- insert:
+    - id: dsh-turn-status-text
+      name: '@dsh-external/dsh-turn-status-text'

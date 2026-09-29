@@ -1,0 +1,28 @@
+name: verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # No install step: the self-check runs on Node built-ins alone, against the
+      # mock DOM/locale/settings in tools/selfcheck.mjs. That is deliberate — the
+      # suite stays runnable in a bare checkout, with no DSH and no network.
+      - name: Syntax-check every tool
+        run: |
+          for file in tools/*.mjs; do node --check "$file"; done
+      - name: Browser half self-check
+        run: node tools/selfcheck.mjs
+      - name: Host half loads and declares its settings namespace
+        run: |
+          npm install --no-save --ignore-scripts @deepseek-ai/schemastery@3.18.4
+          node --input-type=module -e "const m = await import('./lib/index.js'); if (m.NS !== 'turn-status-text' || typeof m.apply !== 'function') throw new Error('bad host half'); console.log('host half ok:', m.name)"

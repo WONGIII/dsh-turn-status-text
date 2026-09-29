@@ -1,0 +1,67 @@
+{
+  "name": "@dsh-external/dsh-turn-status-text",
+  "version": "0.1.0",
+  "description": "Custom text and colour for the DSH chat running-status line — the 「深度求索中，用时 12秒 ···」 row — configured from Settings → Plugins.",
+  "private": true,
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "tools",
+    "cordis.patch.yml",
+    "README.md",
+    "README.en.md",
+    "LICENSE"
+  ],
+  "author": "WONGIII",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/WONGIII/dsh-turn-status-text.git"
+  },
+  "homepage": "https://github.com/WONGIII/dsh-turn-status-text#readme",
+  "bugs": {
+    "url": "https://github.com/WONGIII/dsh-turn-status-text/issues"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "plugin",
+    "client-plugin",
+    "status-text",
+    "turn-status",
+    "chat",
+    "customization",
+    "i18n"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "verify": "node tools/selfcheck.mjs",
+    "selfcheck": "node tools/selfcheck.mjs",
+    "settings": "node tools/verify-live.mjs",
+    "live": "node tools/live-probe.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.4"
+  }
+}

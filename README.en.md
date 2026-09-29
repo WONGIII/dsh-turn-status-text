@@ -24,8 +24,16 @@ Keep `{duration}` in your text and the live elapsed time stays:
 | Colour | Type a colour code, `#4d6bfe` or `#abc`. The whole row takes the colour — the text, the whale mark to its left, and the text's shimmer all follow (see below for why). |
 | Reset to default | One control per field: clear the draft and save, and the text goes back to the copy the deployment ships while the colour goes back to the theme colour. |
 
-Changes are stored in the `dsh-turn-status-text:` section of `$DSH_HOME/settings.yaml`, so they survive a browser switch and a restart;
+The Host writes the changes into the current profile's `cordis.patch.yml`, appending a `config:` section to this row (this is what actually lands on disk), so they survive a browser switch and a restart;
 the plugin makes no network calls and registers nothing the model can see.
+
+```yaml
+- id: dsh-turn-status-text
+  name: "@dsh-external/dsh-turn-status-text"
+  config:
+    text: 宝宝正在努力思考… {duration}
+    color: "#ff5500"
+```
 
 Only the **in-progress line** changes. The `Completed in …` summary after a turn finishes, `Failed`, and the rest stay exactly as shipped.
 
@@ -65,18 +73,17 @@ dsh plugin --profile <your profile> remove @dsh-external/dsh-turn-status-text
 
 ## How to configure
 
-**1. The GUI (recommended)**: **sidebar → Plugins → (Installed) → select this plugin → configure**.
-This plugin's **Status text** card lives in the plugins page's configuration list; expanding it gives two inputs: the custom text and the text colour.
+**1. Configure it in the Plugins page (recommended)**: **sidebar → Plugins → open this plugin in the list → click that chevron title on the row (the `配置 @dsh-external/dsh-turn-status-text` button)** → two inputs: the custom text and the text colour → Save.
+
+![The configuration page inside the Plugins page](docs/plugins-config.png)
 
 > In 0.2.0-rc the plugin configuration is no longer under "Settings → Plugins → Configurable": that tab and the `settings.plugin.item` slot it dispatched do not exist in the new build.
-> The plugins page owns it now — the card registers into the page's `plugins.item` slot, the values travel over the `configForms` service, and the form is the platform's own
-> `SettingsFormModel` / `SettingsForm` / `SettingsValueField`. The same `text` / `color` also appear on that row's own configuration page inside the plugins page (the row's Config *is* the settings section); both places edit the same values.
+> The Plugins page now gives a configuration entry only to **rows that registered a configuration page**: the `plugins.row.config` slot, keyed `<package name>#<row id>`,
+> that is `@dsh-external/dsh-turn-status-text#dsh-turn-status-text` (the `rowConfigKey()` / `configure.has(row)` in `ui-plugin-manager`).
+> The values travel over the `configForms` service (`configForms.get(row id)`, guarded by `whileServed`), and the form is the platform's own
+> `SettingsFormModel` / `SettingsForm` / `SettingsValueField`, so this page looks exactly like the settings pages the deployment ships.
 
-The card is built from the platform's own settings form (`SettingsFormModel` + `SettingsForm` + `SettingsValueField`, all from `@deepseek-ai/dsh-client-ui-primitives`):
-the same border/radius/background layers, the same font sizes and spacing, the same hover and focus-visible states, the same `Overridden` badge and `Reset to default` control, the same `Save` / `Discard` / `This deployment stores settings read-only.` copy,
-and even the form framework's label set comes with those components — so it looks exactly like the settings pages the deployment ships, and the theme (light/dark) is the platform's business too.
-
-Both fields are declared `volatile()`, so saving applies **immediately — no restart and no page reload**.
+Both fields are `volatile()` fields on this row's Config, so a save takes effect **immediately — with neither a restart nor a page reload**.
 
 **2. Temporary override (DevTools console, current page only, wins over the settings)**:
 
@@ -135,31 +142,35 @@ On older deployments (before 0.1.7) that row is `.<hash>_turnStatus` with a grad
 with `/\.([A-Za-z0-9_-]*_turnStatus)(?![\w-])/` and rebuilds a rule with the same gradient geometry;
 the `<style>` element carries `data-plugin-css="dsh-turn-status-text"` and is removed on uninstall. With the colour left empty the rule's text is the empty string, which leaves the deployment's styles completely alone.
 
-### The settings card
+### The configuration page
 
 **The settings entry *is* this row's Config**: the row id `- id: dsh-turn-status-text` in `cordis.patch.yml` is the key of the settings entry,
-the Host projects the row's Config schema into a settings section (one namespace in `settings/describe`) and the Plugins page renders the form from it —
-so no `settings.register`-style call is needed at all, and all three sides (the Host projection, the Plugins page form, the browser half's reads) align on the same id by construction.
+the Host projects the row's Config schema into a settings section (one namespace in `settings/describe`), so no `settings.register`-style call is needed at all,
+and all three sides (the Host projection, the Plugins page form, the browser half's reads) align on the same id by construction.
 
 Both fields carry `volatile()`: `volatile` means "the value can be changed without remounting this row, and what you read is always the latest value",
-which is why SettingsForm puts it into an editable form; an empty-string default means "inherit" (the shipped copy / the theme colour).
+which is why the Plugins page puts it into an editable form; an empty-string default means "inherit" (the shipped copy / the theme colour).
 
-The browser half reads and writes through the platform services only:
+**But the settings section being served ≠ the Plugins page giving it an entry**: the Plugins page renders that chevron "Config" title only for rows that registered `plugins.row.config`,
+and the key has to be `<package name>#<row id>`. So this registration is the second thing the browser half has to do:
 
 ```js
-const inject = ['slots', 'locale']                      // required services: just these two
-ctx.inject(['configForms', 'slots'], (scoped) => {      // settings form optional: without it the label override still works
-  scope = scoped.configForms.get('dsh-turn-status-text') // ConfigFormController: getSnapshot/ subscribe/ set/ mutate
-  const card = new TurnStatusTextCardController(scope)   // wraps the platform's SettingsFormModel
-  scoped.configForms.whileServed([NS], () => scoped.slots.inject('plugins.item', () => scoped.slots.register({
-    name: 'plugins.item', id: NS, order: 20, label: () => t('title'), locale: CARD_NS,
-    inject: () => card.inject(),                         // { hooks, edit, resetField, discard, save }
+const inject = ['slots', 'locale']                       // required services: just these two
+ctx.inject(['configForms', 'slots'], (scoped) => {       // settings form optional: without it the label override still works
+  scope = scoped.configForms.get('dsh-turn-status-text')  // ConfigFormController: getSnapshot/ subscribe/ set/ mutate
+  const card = new TurnStatusTextCardController(scope)    // wraps the platform's SettingsFormModel
+  scoped.configForms.whileServed([NS], () => scoped.slots.inject('plugins.row.config', () => scoped.slots.register({
+    name: 'plugins.row.config',
+    key: '@dsh-external/dsh-turn-status-text#dsh-turn-status-text',
+    locale: CARD_NS,
+    inject: () => card.inject(),                          // { hooks, edit, resetField, discard, save }
   }, TurnStatusTextCard)))
 })
 ```
 
-`whileServed` is the guard the platform provides for "mount the card only when the Host really serves this settings entry": on a deployment that has not composed this row, the Plugins page shows no trace of the card at all.
-Staging/saving/discarding/resetting to default are the platform form model's job; the plugin only hands it the scope and projects itself into the snapshot the component reads.
+`whileServed` is the guard the platform provides for "mount this page only when the Host really serves this settings entry": on a deployment that has not composed this row, the Plugins page shows no trace of it.
+The row configuration page calls the component with `view: 'page'` (the summary row in the row list is `view: 'summary'`), and the platform also passes a `form` (`{state, mutate}`) in;
+this plugin wraps its own `SettingsFormModel` (the same `configForms` scope), so staging / saving / discarding / resetting to default mean exactly what they mean on the settings pages the deployment ships.
 
 ### Why the colour rule is written this way
 
@@ -175,9 +186,9 @@ dsh-turn-status-text/
 ├── package.json          # dsh.bundle.patch / dsh.client.platform = web; exports["./client"] → the browser bundle
 ├── cordis.patch.yml      # bundle layer: inserts one dsh-turn-status-text row
 ├── lib/
-│   ├── host.js           # host half: registers the settings namespace dsh-turn-status-text (text + color)
+│   ├── host.js           # host half: declares the settings-entry row's Config (row id dsh-turn-status-text, text + color, volatile)
 │   ├── index.js          # package entry (package.json main): re-exports ./host.js
-│   └── client.js         # browser half: rewrites the copy + colours the row + the settings card
+│   └── client.js         # browser half: rewrites the copy + colours the row + the configuration page in the Plugins page
 ├── tools/
 │   ├── selfcheck.mjs     # headless self-check (fake DOM + fake LocaleRuntime/ConfigForms running the real bundle)
 │   ├── verify-live.mjs   # queries/writes the settings namespace of a running instance
@@ -198,7 +209,7 @@ The host half imports only `@deepseek-ai/schemastery` (declared as a regular dep
 node tools/selfcheck.mjs
 node tools/selfcheck.mjs <copy of the client.js the server serves>   # check the exact bytes that ship
 
-# 2) Confirm a running instance serves the settings entry (so the card gets mounted)
+# 2) Confirm a running instance serves the settings entry (so the configuration page gets mounted)
 node tools/verify-live.mjs
 node tools/verify-live.mjs --set "Thinking hard… {duration}"
 node tools/verify-live.mjs --color "#ff5500"
@@ -218,8 +229,9 @@ node tools/hmr-probe.mjs 15
 `selfcheck.mjs` covers: text precedence (including `{duration}` filling and "swallow the placeholder when there is nothing to fill it with"), non-target keys forwarded untouched,
 colour normalization (`#ABC` → `#aabbcc`, `4d6bfe` → `#4d6bfe`, `red`/`#12345` rejected),
 the **exact CSS text** of both attribute selectors and of the legacy `_turnStatus` gradient rule, the page-global overrides and their fallback,
-the binding of `configForms.get(row id)`, the `whileServed` guard (no card mounted when the settings entry is not served),
-the card projection and the injection of the form actions, a field edit / reset to default landing in the settings through the platform form and rendering on the status line,
+the binding of `configForms.get(row id)`, the `whileServed` guard (no configuration page mounted when the settings entry is not served),
+the `plugins.row.config` slot and the `<package name>#<row id>` key, both the summary and the full-page view,
+the form state and the injection of the form actions, a field edit / reset to default landing in the settings through the platform form and rendering on the status line,
 a scope without `mutate` falling back to `set`/`unset`, and the style element and the dictionaries removed after cleanup.
 
 `verify-live.mjs` signs a loopback page cookie with the browser-session secret from the local `$DSH_HOME/.credentials.yaml`,
@@ -263,17 +275,36 @@ this time of **this session's own in-flight turn** — verifies the `{duration}`
 
 That is `docs/after-duration.png`: custom text, still-live elapsed time.
 
-The settings card itself requires the Host to really serve this settings entry (the `whileServed` guard). This machine's DSH process was started before the plugin was installed
-and the settings directory is composed at startup, so **the card only shows up after one DSH restart**; before that restart the two effect paths (copy / colour) can be verified with the page globals above,
-while the card half is covered by `selfcheck.mjs` against a `ConfigForms` shaped like the production one (with `get`/`whileServed`/`mutate`) and the same set of interfaces as the platform's settings form
-(`SettingsFormModel.shell/field/bind/actions/dispose`): registration timing, projected fields, editing, resetting to default, saving to the store, and not mounting the card when the entry is not served.
+### The whole configure loop in the Plugins page (measured live)
+
+After a DSH restart the settings entry is served properly (`node tools/verify-live.mjs` →
+
+```
+OK: dsh-turn-status-text is served -> {"text":"","color":""}
+```
+
+), and then headless Chromium walked the real UI once:
+
+1. sidebar **Plugins** → open `@dsh-external/dsh-turn-status-text` in the plugin list;
+2. that row's title turns into a chevron button, `aria-label="配置 @dsh-external/dsh-turn-status-text"` (without the `plugins.row.config` registration it is plain text);
+3. click it → the page renders the two fields **自定义文字** / **文字颜色** (custom text / text colour);
+4. fill in `宝宝正在努力思考… {duration}` and `#ff5500`, click **Save**;
+5. back in the conversation, read the status line:
+
+```
+{"found":true,"rowClass":"xz4KEq_running","text":"宝宝正在努力思考…宝宝正在努力思考… 6分43秒",
+ "rowColor":"rgb(255, 85, 0)","deepDivingVar":"#ff5500","shimmerVar":"#ff5500"}
+```
+
+The leading half is the `aria-live` announcement and the trailing half is the visible row; the configuration page is in `docs/plugins-config.png`.
+In other words: **save in the Plugins page → the chat row renders with your text and colour at once**, with no page reload anywhere in the loop.
 
 ## Compatibility
 
 | Deployment | Copy keys | Colour anchor | Settings entry | Supported |
 | --- | --- | --- | --- | --- |
-| 0.2.0-rc (current desktop app) | `chat.deepDiving` / `chat.deepDivingFor` | `[data-chat-running]` | row id `dsh-turn-status-text` + `configForms` | ✅ verified live (copy/colour; card see below) |
-| 0.1.7-rc | `message.turnProcess.deepDivingFor` | `[data-turn-process]` | the old `settingsScope` service | ⚠️ copy/colour work; the settings card is implemented against the 0.2.0-rc contract |
+| 0.2.0-rc (current desktop app) | `chat.deepDiving` / `chat.deepDivingFor` | `[data-chat-running]` | row id `dsh-turn-status-text` + `configForms` + `plugins.row.config` | ✅ full loop verified live |
+| 0.1.7-rc | `message.turnProcess.deepDivingFor` | `[data-turn-process]` | the old `settingsScope` service | ⚠️ copy/colour work; the configuration page follows the 0.2.0-rc contract |
 | before 0.1.7 | `chat.deepDiving` | `.<hash>_turnStatus` (discovered at runtime) | same as above | ⚠️ same as above |
 
 The host half depends on `@deepseek-ai/schemastery@^3.18.4` (the harness ships the same version); it declares no `prepare`, so a git install needs no build-script approval.
@@ -284,7 +315,7 @@ The host half depends on `@deepseek-ai/schemastery@^3.18.4` (the harness ships t
 - The colour applies to the **whole row** (whale mark included), because it is that row's `color`/colour variables; there is no separate whale switch.
 - The colour field is a text input (the control the platform's settings form gives), so there is no colour picker; the colour you type is normalized at render time, and an invalid value simply means "no colour".
 - Content-hashed class names only need discovering on the legacy path, so a very old deployment that renamed `_turnStatus` gets no colour (the text override still works).
-- On 0.1.7 and older: both the copy and the colour paths still exist, but the settings card is written against 0.2.0-rc's `configForms` + `plugins.item` contract,
+- On 0.1.7 and older: both the copy and the colour paths still exist, but the configuration page is written against 0.2.0-rc's `configForms` + `plugins.row.config` contract,
   so it never shows up on those older versions (which had no such settings API in the first place).
 - Placeholders other than `{duration}` are rendered verbatim.
 

@@ -12,6 +12,10 @@
 上图是同一台机器上的两次真实截屏：左边是部署原样（`深度求索中，用时 6分29秒 ···`），
 右边把文字换成 `硬邦邦思考中…`、颜色换成 `#ff5500`（左边的小鲸鱼、右侧的流光也一起换了色）。
 
+文字里写 `{duration}` 时，实时用时会保留：
+
+![保留用时的自定义状态行](docs/after-duration.png)
+
 ## 你能改什么
 
 | 能改 | 说明 |
@@ -221,6 +225,16 @@ node tools/hmr-probe.mjs 15
 
 第一行文字里前半段是 `aria-live` 的无障碍播报（同一个键）、后半段是可见的那行；
 两组数据分别对应 `docs/before.png` 与 `docs/after.png`。
+
+插件已按上面的 GitHub 地址装进这台机器的桌面端 profile（`github:WONGIII/dsh-turn-status-text`，由插件管理页写入 `dsh.profile.bundles`）后，
+再对**本会话自己**（真正在跑的那轮）读一次，验证 `{duration}` 占位符：
+
+```
+{"found":true,"rows":1,"rowClass":"xz4KEq_running","text":"硬邦邦思考中…硬邦邦思考中… 34分21秒",
+ "rowColor":"rgb(255, 85, 0)","deepDivingVar":"#ff5500","shimmerVar":"#ff5500"}
+```
+
+即 `docs/after-duration.png`：文字是自定义的，用时仍是实时的。
 
 ## 兼容性
 

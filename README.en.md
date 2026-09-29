@@ -12,6 +12,10 @@ from **Settings → Plugins → Configurable** — save and it applies immediate
 Both images are real screenshots from the same machine: the left is the deployment as shipped (`深度求索中，用时 6分29秒 ···`),
 the right swaps the text for `硬邦邦思考中…` and the colour for `#ff5500` (the whale mark on the left and the shimmer on the right change colour with it).
 
+Keep `{duration}` in your text and the live elapsed time stays:
+
+![Custom status line keeping the elapsed time](docs/after-duration.png)
+
 ## What you can change
 
 | What | Details |
@@ -221,6 +225,17 @@ On the DSH desktop app (0.2.0-rc.2), `live-probe.mjs` reading a real in-flight s
 
 In the first line's text the leading half is the `aria-live` announcement (the same key) and the trailing half is the visible row;
 the two readings correspond to `docs/before.png` and `docs/after.png`.
+
+With the plugin installed into this machine's desktop profile from the GitHub address above
+(`github:WONGIII/dsh-turn-status-text`, written into `dsh.profile.bundles` by the Plugins page), one more reading —
+this time of **this session's own in-flight turn** — verifies the `{duration}` placeholder:
+
+```
+{"found":true,"rows":1,"rowClass":"xz4KEq_running","text":"硬邦邦思考中…硬邦邦思考中… 34分21秒",
+ "rowColor":"rgb(255, 85, 0)","deepDivingVar":"#ff5500","shimmerVar":"#ff5500"}
+```
+
+That is `docs/after-duration.png`: custom text, still-live elapsed time.
 
 ## Compatibility
 

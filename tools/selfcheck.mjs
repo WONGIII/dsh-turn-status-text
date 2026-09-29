@@ -16,9 +16,9 @@
  *     actions/dispose), the `SettingsForm` and `SettingsValueField` components,
  *     and `settingsTextField`. The model folds staged drafts into the scope on
  *     save, so a save can be followed all the way to the rendered label.
- *   - The slot renderer's contract: the card registers into `plugins.item` with
- *     this plugin's settings entry as its id, gets its `hooks` face bound as a
- *     `use<Name>` prop, and renders an element tree.
+ *   - The slot renderer's contract: the row config registers into `plugins.row.config` keyed
+ *     `<package>#<row id>`, gets its `hooks` face bound as a
+ *     `use<Name>` prop, and renders an element tree; the summary and page views are both exercised.
  *   - The chat stylesheet: the running row is styled by attributes
  *     (`[data-chat-running]`) the plugin can address without discovery, and a
  *     legacy build's content-hashed `.EvIC1a_turnStatus` rule arrives later, so
@@ -45,6 +45,8 @@ const bundlePath = process.argv[2] ?? join(here, '..', 'lib', 'client.js')
 const ENTRY_ID = 'dsh-turn-status-text'
 /** Dictionary namespace the card owns. */
 const CARD_NS = 'settings.turnStatusText'
+/** Legacy status class a pre-0.1.7 build gives the label (hash prefix + local name). */
+const PACKAGE = '@dsh-external/dsh-turn-status-text'
 /** Legacy status class a pre-0.1.7 build gives the label (hash prefix + local name). */
 const LEGACY_STATUS_CLASS = 'EvIC1a_turnStatus'
 
@@ -483,7 +485,7 @@ const scoped = {
   configForms,
   slots: {
     inject(name, register) {
-      assert.equal(name, 'plugins.item', 'the card joins the Plugins page card list')
+      assert.equal(name, 'plugins.row.config', 'the card joins the Plugins page row-config slot')
       return register()
     },
     register(options, component) {
@@ -503,11 +505,9 @@ injectedCallback(scoped)
 assert.deepEqual(configForms.seen, [ENTRY_ID], 'the form scope is bound to this plugin\'s settings entry')
 assert.equal(slotRegistrations.length, 1, 'exactly one card is contributed')
 const card = slotRegistrations[0]
-assert.equal(card.options.name, 'plugins.item')
-assert.equal(card.options.id, ENTRY_ID, 'the card is keyed by the settings entry the Host serves')
+assert.equal(card.options.name, 'plugins.row.config')
+assert.equal(card.options.key, PACKAGE + '#' + ENTRY_ID, 'the row is keyed `<bundle package name>#<row id>`, which is what the Plugins page looks up')
 assert.equal(card.options.locale, CARD_NS)
-assert.equal(typeof card.options.label, 'function')
-assert.equal(card.options.label(), '状态文案', 'the card label comes from this plugin\'s dictionary')
 assert.equal(locale.dictionary?.ns, CARD_NS, 'the card registers its own dictionary namespace')
 //#endregion
 

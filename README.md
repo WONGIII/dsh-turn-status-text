@@ -3,7 +3,7 @@
 [English](README.en.md) | 中文
 
 给 DSH（DeepSeek Harness）聊天区那行**「深度求索中，用时 12秒 ···」**换成你自己写的文字和你自己选的颜色，
-在**设置 → 插件 → 可配置**里改，保存即生效，不用刷新页面。
+在**侧栏「插件」页选中本插件后配置**，保存即生效，不用刷新页面。
 
 | 默认 | 改过之后 |
 | --- | --- |
@@ -21,7 +21,7 @@
 | 能改 | 说明 |
 | --- | --- |
 | 文字 | 任意文字。写 `{duration}` 占位符可以保留实时用时，例如 `宝宝正在努力思考… {duration}` → `宝宝正在努力思考… 12秒`；不写占位符就整行只显示你的文字。 |
-| 颜色 | 调色盘或手填 `#4d6bfe` / `#abc`（`#` 可省略）。整行统一上色——文字、左边的小鲸鱼、以及文字的流光渐变都跟着走（原理见下）。 |
+| 颜色 | 填颜色代码 `#4d6bfe` 或 `#abc`。整行统一上色——文字、左边的小鲸鱼、以及文字的流光都跟着走（原理见下）。 |
 | 恢复默认 | 每个字段各有一个：把草稿清空再保存，文字回到部署原文案，颜色回到主题色。 |
 
 改动存在 `$DSH_HOME/settings.yaml` 的 `turn-status-text:` 段里，跨浏览器、重启后仍在；
@@ -64,13 +64,19 @@ dsh plugin --profile <你的 profile> remove @dsh-external/dsh-turn-status-text
 
 ## 怎么改
 
-**1. 图形界面（推荐）**：设置 → **插件** → **可配置** → 展开 **「状态文案」** 卡片。
+**1. 图形界面（推荐）**：**侧栏「插件」页 →（已安装 / Installed）→ 找到本插件 → 配置**。
+本插件的卡片「状态文案」就在插件页的配置列表里，展开是两个输入框：自定义文字、文字颜色。
 
-卡片与部署自带的插件卡片同款：同边框/圆角/背景层、同字号间距、hover 与 focus-visible 状态、标题栏可折叠并**记住折叠状态**；
-「展开设置/收起设置」「放弃修改」「已覆盖」「恢复默认」「本部署的设置为只读。」这些文案取自平台自己的词典，
-图标与 `Tag` 组件用平台自己的（`@deepseek-ai/dsh-client-ui-primitives`）。
+> 0.2.0-rc 的插件配置已经不在"设置 → 插件 → 可配置"里了：那个标签页与它 dispatch 的 `settings.plugin.item` 槽位在新版里已经不存在，
+> 现在由插件页自己承载——配置卡片注册进插件页的 `plugins.item` 槽位，设置值走 `configForms` 服务，
+> 表单用平台自己的 `SettingsFormModel` / `SettingsForm` / `SettingsValueField`。
+> 同一个 `text` / `color` 也出现在插件页里该 row 的配置页上（row 的 Config 就是设置分区），两处改的是同一份值。
 
-卡片底部有一行**预览**，用当前草稿的文字和颜色直接显示；颜色非法（比如 `#12345`）会红字提示并禁用保存。
+卡片用的是平台自己的设置表单（`SettingsFormModel` + `SettingsForm` + `SettingsValueField`，都来自 `@deepseek-ai/dsh-client-ui-primitives`）：
+同边框/圆角/背景层、同字号间距、hover 与 focus-visible 状态、同一个「已覆盖」徽章与「恢复默认」控件、同一套「保存 / 放弃修改 / 本部署的设置为只读。」文案，
+连表单框架的标签集都是这套组件自带的——所以它和部署自带的设置页长得完全一样，主题（浅色/深色）也由平台负责。
+
+两个字段都声明为 `volatile()`，所以改完保存**立即生效、不用重启也不用刷新**。
 
 **2. 临时覆盖（DevTools 控制台，只在当前页面生效，优先级高于设置）**：
 
@@ -105,22 +111,24 @@ const label = startTime === undefined
 `{duration}` 由插件自己替换成框架传来的用时字符串；没有 duration 参数时（比如「时钟还没开始」的那个键）
 占位符会被吃掉并折叠多余空格，不会漏出花括号。
 
-### 颜色：一条更高优先级的规则 + `currentColor`
+### 颜色：一条更高优先级的规则 + 平台自己的着色变量
 
-那行文字不是用 `color` 直接画的平面文字，而是 `TextShimmer`：一层用 `currentColor` 生成的渐变，
-配合 `background-clip: text` + `-webkit-text-fill-color: transparent` 做流光。所以**只要把这一行的 `color` 定下来，流光会自己用新颜色重画**，
-几何、动画、节奏全部保持原样。
+0.2.0-rc 里那行文字不是平面文字，而是 `TextShimmer`（一层用遮罩扫过的文字）：它的着色变量是 `--dsw-alias-label-shimmer`，
+而 `.X_running` 又把它映射自 `--dsw-alias-label-deep-diving-shimmer`。所以规则里**两个自定义属性是必需的**（不是锦上添花），
+`color` 则负责更老的版本（那时确实是 `currentColor` 渐变）并顺手统一小鲸鱼。
 
 插件注入的就是这一条（选择器写两遍 = 0,2,0，稳压生成类名的 0,1,0，与样式表先后无关）：
 
 ```css
 [data-chat-running][data-chat-running]{
-  color:#ff5500;
-  --dsw-alias-label-deep-diving:#ff5500;   /* 部署自己用的两个变量也一并改掉 */
+  color:#ff5500;                            /* 更老的版本靠它上色，也顺手统一小鲸鱼 */
+  --dsw-alias-label-deep-diving:#ff5500;    /* 部署自己用的两个变量 */
   --dsw-alias-label-shimmer:#ff5500;
 }
 [data-turn-process][data-turn-process]{color:#ff5500}   /* 0.1.7 的 turn-process 行 */
 ```
+
+流光几何、动画、节奏全部保持原样，只换颜色。
 
 行本身用**属性**定位（`data-chat-running` / `data-turn-process`），不依赖会随构建变化的内容哈希类名。
 更老的部署（0.1.7 之前）那行是 `.<hash>_turnStatus` 加一条渐变背景，插件会从 `document.styleSheets` 里
@@ -129,20 +137,36 @@ const label = startTime === undefined
 
 ### 配置卡片
 
-Host 半侧注册设置命名空间 `turn-status-text`（schemastery：`text` 与 `color`，默认值都是空串 = 继承部署原文案/主题原色）；
-浏览器半侧向 `settings.plugin.item` 槽位注册同 key 的卡片——Web 插件页的「可配置」标签会为 host 提供的每个命名空间 dispatch 一次这个槽位，
-这是官方给仓库外插件准备的扩展点。
+**设置项就是这一行的 Config**：`cordis.patch.yml` 里 `- id: dsh-turn-status-text` 这个 row id 就是设置条目的 key，
+Host 把 row 的 Config schema 投影成设置分区（`settings/describe` 里的一个 namespace），插件页据此渲染表单——
+所以不需要任何 `settings.register` 之类的注册调用，三方（Host 投影、插件页表单、浏览器半侧读取）天然对齐同一个 id。
 
-写入契约与平台一致：`edit(field, text)` 暂存、`resetField(field)` 暂存清空、`discard()` 放弃、`save()` 落盘；
-保存走 `scope.mutate([...ops])` **一次原子写**（两个字段一起改也只写一次），没有 `mutate` 的实现退回 `set`/`unset`。
-保存后的校验读的是 **user 层**而不是解析后的值：`unset` 之后 Host 会按 schema 默认值重新解析这个分区，
-所以「颜色被清空」表现为 `user` 里没有这个字段、`value` 里是默认值——按 `value === undefined` 判断会把清空误报成保存失败。
-颜色在保存时归一化为小写 `#rrggbb`。
+两个字段都带 `volatile()`：`volatile` 是"值可以在不重新挂载这个 row 的前提下被改，并且读到的始终是最新值"，
+SettingsForm 因此把它放进可编辑表单；空串默认值表示"继承"（部署原文案 / 主题原色）。
 
-卡片样式只走主题别名 token（`--dsw-alias-bg-layer-2/3`、`--dsw-alias-label-primary/secondary/tertiary`、
-`--dsw-alias-border-l2/l4`、`--dsw-alias-label-error`、`--dsw-alias-brand-primary`、`--dsw-alias-label-dimmed`），
-没有任何硬编码颜色，浅色/深色切换交给主题。
-（踩过的坑：`--dsw-alias-bg-layer` 这个名字**不存在**，写了会一路 fallback 到深色兜底值，在浅色主题下就是一块黑输入框。）
+浏览器半侧的读与写都走平台服务：
+
+```js
+const inject = ['slots', 'locale']                      // 必需服务：只有这两个
+ctx.inject(['configForms', 'slots'], (scoped) => {      // 设置表单可选：没有它标签覆盖照常工作
+  scope = scoped.configForms.get('dsh-turn-status-text') // ConfigFormController：getSnapshot/ subscribe/ set/ mutate
+  const card = new TurnStatusTextCardController(scope)   // 包住平台的 SettingsFormModel
+  scoped.configForms.whileServed([NS], () => scoped.slots.inject('plugins.item', () => scoped.slots.register({
+    name: 'plugins.item', id: NS, order: 20, label: () => t('title'), locale: CARD_NS,
+    inject: () => card.inject(),                         // { hooks, edit, resetField, discard, save }
+  }, TurnStatusTextCard)))
+})
+```
+
+`whileServed` 是平台提供的"只在 Host 真的提供这个设置条目时才挂卡片"的守卫：没组合这一行的部署里，插件页看不到这张卡片的任何痕迹。
+暂存/保存/放弃/恢复默认由平台表单模型负责，插件只把 scope 交给它、并把自己投影成组件要读的 snapshot。
+
+### 颜色规则为什么这样写
+
+0.2.0-rc 那行的流光不是 `background-clip: text` 的渐变，而是一层用遮罩扫过的文字：
+`TextShimmer` 的着色变量是 `--dsw-alias-label-shimmer`，而 `.X_running` 把它映射自 `--dsw-alias-label-deep-diving-shimmer`。
+所以规则里**两个自定义属性是必需的**（不是锦上添花）：改了它们，流光就换成新颜色，而几何与动画完全不动。
+`color` 一起写是为了兼容更老的版本（那时确实是 `currentColor` + `background-clip:text`），也顺手让小鲸鱼与整行统一。
 
 ## 结构
 
@@ -170,11 +194,11 @@ host 半侧只 import `@deepseek-ai/schemastery`（声明为普通依赖，harne
 ## 开发与验证
 
 ```bash
-# 1) 浏览器半侧自检：假 DOM + 与线上同语义的 LocaleRuntime/SettingsScope 跑真实 bundle
+# 1) 浏览器半侧自检：假 DOM + 与线上同语义的 LocaleRuntime/ConfigForms/设置表单跑真实 bundle
 node tools/selfcheck.mjs
 node tools/selfcheck.mjs <服务器下发的 client.js 副本>   # 检线上真正下发的字节
 
-# 2) 向运行中的实例确认设置命名空间被提供（卡片会被 dispatch）
+# 2) 向运行中的实例确认设置条目被提供（卡片会被挂上）
 node tools/verify-live.mjs
 node tools/verify-live.mjs --set "宝宝正在努力思考… {duration}"
 node tools/verify-live.mjs --color "#ff5500"
@@ -194,7 +218,9 @@ node tools/hmr-probe.mjs 15
 `selfcheck.mjs` 覆盖：文案优先级（含 `{duration}` 填充与"没填就吃掉占位符"）、非目标键原样转发、
 颜色归一化（`#ABC` → `#aabbcc`、`4d6bfe` → `#4d6bfe`、`red`/`#12345` 拒绝）、
 两个属性选择器与旧版 `_turnStatus` 渐变规则的**精确 CSS 文本**、页面全局覆盖与回退、
-非法颜色禁用保存且不写盘、「恢复默认」清空字段、两字段一次原子写、清理后样式元素被移除。
+`configForms.get(row id)` 的绑定、`whileServed` 守卫（没提供这个设置条目时不挂卡片）、
+卡片投影与表单动作的注入、字段编辑/恢复默认经平台表单保存后落到设置并渲染到状态行、
+没有 `mutate` 的 scope 退回 `set`/`unset`、清理后样式元素与词典都被移除。
 
 `verify-live.mjs` 用本机 `$DSH_HOME/.credentials.yaml` 里的 browser-session 密钥签一个 loopback 页面 cookie，
 再调 `settings/describe` / `settings/mutate`（密钥不会被打印）。
@@ -236,21 +262,29 @@ node tools/hmr-probe.mjs 15
 
 即 `docs/after-duration.png`：文字是自定义的，用时仍是实时的。
 
+设置卡片本身要求 Host 真的提供这个设置条目（`whileServed` 守卫）。本机这个 DSH 进程是在插件装好之前启动的，
+设置目录在启动时就组合好了，所以**卡片要重启一次 DSH 才会出现**；重启前两条效果路径（文案 / 颜色）用上面的页面全局即可验证，
+而卡片那半边由 `selfcheck.mjs` 用与线上同形的 `ConfigForms`（含 `get`/`whileServed`/`mutate`）和平台设置表单的同一组接口
+（`SettingsFormModel.shell/field/bind/actions/dispose`）跑过：注册时机、投影字段、编辑、恢复默认、保存落库、未提供条目时不挂卡片。
+
 ## 兼容性
 
-| 部署 | 文案键 | 上色锚点 | 支持 |
-| --- | --- | --- | --- |
-| 0.2.0-rc（当前桌面端） | `chat.deepDiving` / `chat.deepDivingFor` | `[data-chat-running]` | ✅ 实测 |
-| 0.1.7-rc | `message.turnProcess.deepDivingFor` | `[data-turn-process]` | ✅ |
-| 0.1.7 之前 | `chat.deepDiving` | `.<hash>_turnStatus`（运行时发现） | ✅ |
+| 部署 | 文案键 | 上色锚点 | 设置条目 | 支持 |
+| --- | --- | --- | --- | --- |
+| 0.2.0-rc（当前桌面端） | `chat.deepDiving` / `chat.deepDivingFor` | `[data-chat-running]` | row id `dsh-turn-status-text` + `configForms` | ✅ 实测（文案/颜色；卡片见下） |
+| 0.1.7-rc | `message.turnProcess.deepDivingFor` | `[data-turn-process]` | 旧版 `settingsScope` 服务 | ⚠️ 文案/颜色可用，设置卡片按 0.2.0-rc 契约实现 |
+| 0.1.7 之前 | `chat.deepDiving` | `.<hash>_turnStatus`（运行时发现） | 同上 | ⚠️ 同上 |
 
 host 半侧依赖 `@deepseek-ai/schemastery@^3.18.4`（harness 自带同版本）；不声明 `prepare`，git 安装无需放行构建脚本。
 
 ## 限制
 
 - 只改「进行中」那行；轮次结束后汇总行的文案（`message.turnProcess.took` 等）不在覆盖范围。
-- 颜色作用于**整行**（含左侧小鲸鱼），因为它就是这一行的 `color`；没有单独的小鲸鱼开关。
+- 颜色作用于**整行**（含左侧小鲸鱼），因为它就是这一行的 `color`/着色变量；没有单独的小鲸鱼开关。
+- 颜色字段是文本输入（平台设置表单给的控件），没有取色盘；填的颜色在渲染时归一化，非法值等于"不上色"。
 - 内容哈希类名只在旧版路径上需要发现，极老的部署若把 `_turnStatus` 换了名字则拿不到颜色（文字覆盖仍然有效）。
+- 0.1.7 及更早的部署：文案与颜色两条路径都还在，但设置卡片是按 0.2.0-rc 的 `configForms` + `plugins.item` 契约写的，
+  在这些老版本上不会出现（那两版本来也没有这套设置 API）。
 - `{duration}` 之外的占位符会被原样显示。
 
 ## License

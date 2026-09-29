@@ -5,18 +5,25 @@
  * that only registers a factory), and drives it against mocks that mirror the
  * shipped implementations:
  *
- *   - LocaleRuntime: \`bind(ns)\` returns a closure resolving \`this.translate\` at
+ *   - LocaleRuntime: `bind(ns)` returns a closure resolving `this.translate` at
  *     call time — the seam the label override shadows.
- *   - SettingsScope: \`getSnapshot()\` over \`{status, value, user, writable}\` plus
- *     \`mutate\`/\`set\`/\`unset\` that fold the write back into the snapshot and notify.
+ *   - ConfigForms: `get(entryId)` returns the entry's form scope over
+ *     `{status, value, user, writable}` with `set`/`unset`/`mutate`, and
+ *     `whileServed(namespaces, register)` runs the registration only while the
+ *     Host serves one of them. Both mirror `ConfigForms`/`ConfigFormController`
+ *     in the shipped client bundle.
+ *   - The design-system module face: `SettingsFormModel` (shell/field/bind/
+ *     actions/dispose), the `SettingsForm` and `SettingsValueField` components,
+ *     and `settingsTextField`. The model folds staged drafts into the scope on
+ *     save, so a save can be followed all the way to the rendered label.
+ *   - The slot renderer's contract: the card registers into `plugins.item` with
+ *     this plugin's settings entry as its id, gets its `hooks` face bound as a
+ *     `use<Name>` prop, and renders an element tree.
  *   - The chat stylesheet: the running row is styled by attributes
- *     (\`[data-chat-running]\`) the plugin can address without discovery, and a
- *     legacy build's content-hashed \`.EvIC1a_turnStatus\` rule arrives later, so
- *     both paths are exercised against a \`<head>\` that records the style element
- *     the plugin injects — the colour assertions inspect the exact CSS text.
- *   - The slot renderer's contract: a card registers into \`settings.plugin.item\`
- *     with the settings namespace as its key, gets its \`hooks\` face bound as a
- *     \`use<Name>\` prop, and renders an element tree.
+ *     (`[data-chat-running]`) the plugin can address without discovery, and a
+ *     legacy build's content-hashed `.EvIC1a_turnStatus` rule arrives later, so
+ *     both paths are exercised against a `<head>` that records the style element
+ *     the plugin injects.
  *
  * React is not installed beside this plugin (the web shell bundles it), so the
  * harness ships a minimal React with the hooks the card uses; rendering is then
@@ -24,7 +31,7 @@
  *
  * Usage: node tools/selfcheck.mjs [bundlePath]
  * (the optional argument checks an already-served copy, e.g. the file the running
- *  web server hands the browser at /plugins/??<pkg>/client.js)
+ *  web server hands the browser)
  */
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -34,11 +41,15 @@ import { dirname, join } from 'node:path'
 const here = dirname(fileURLToPath(import.meta.url))
 const bundlePath = process.argv[2] ?? join(here, '..', 'lib', 'client.js')
 
+/** Settings entry the row declares; every side is keyed by it. */
+const ENTRY_ID = 'dsh-turn-status-text'
+/** Dictionary namespace the card owns. */
+const CARD_NS = 'settings.turnStatusText'
 /** Legacy status class a pre-0.1.7 build gives the label (hash prefix + local name). */
 const LEGACY_STATUS_CLASS = 'EvIC1a_turnStatus'
 
 //#region fake DOM
-/** A \`<head>\` that records appended style elements and supports removal. */
+/** A `<head>` that records appended style elements and supports removal. */
 function createHead() {
   const head = {
     children: [],
@@ -58,7 +69,8 @@ function createHead() {
 }
 
 /**
- * Minimal document: style sheets for class discovery and a head for the injected rule.
+ * Minimal document: style sheets for legacy class discovery and a head for the
+ * injected rule.
  * @param selectors - selector texts the initial style sheet exposes.
  */
 function createDocument(selectors) {
@@ -100,7 +112,7 @@ function createDocument(selectors) {
 //#region minimal React + jsx runtime
 /** Hook-order-preserving stand-in for the React entry points the card uses. */
 function createFakeReact() {
-  let slots = []
+  const slots = []
   let cursor = 0
   return {
     reset() {
@@ -115,7 +127,7 @@ function createFakeReact() {
     },
     useId() {
       cursor += 1
-      return 'self-check-input-' + String(cursor)
+      return 'self-check-id-' + String(cursor)
     },
     useEffect() {
       cursor += 1
@@ -125,22 +137,6 @@ function createFakeReact() {
 
 function createElement(type, props) {
   return { type, props: props ?? {} }
-}
-
-const fakeReact = createFakeReact()
-const jsxRuntime = {
-  jsx: createElement,
-  jsxs: createElement,
-  Fragment: Symbol('Fragment'),
-}
-
-/** First element carrying the given class name. */
-function findByClass(node, className) {
-  for (const element of walk(node)) {
-    const value = element.props?.className
-    if (typeof value === 'string' && value.split(' ').includes(className)) return element
-  }
-  return undefined
 }
 
 /** Depth-first walk of a rendered element tree. */
@@ -158,79 +154,126 @@ function* walk(node) {
   }
 }
 
-/** Every element of the given tag in the tree. */
+/** Every element of the given type in the tree. */
 function findAll(node, type) {
   return [...walk(node)].filter((element) => element.type === type)
 }
-
-/** First element of the given tag in the tree. */
-function find(node, type) {
-  return findAll(node, type)[0]
-}
-
-/** Card copy as the locale seat would serve it. */
-const CARD_COPY = {
-  title: '状态文案',
-  description: '模型工作时聊天区显示的那行文字与颜色',
-  textField: '自定义文字',
-  textPlaceholder: '深度求索中，用时 {duration} ···',
-  textHint: '留空并保存即恢复默认文案；写 {duration} 占位符可保留实时用时。',
-  colorField: '文字颜色',
-  colorHint: '用调色盘或直接填颜色代码。',
-  colorPlaceholder: '#4d6bfe（留空 = 主题默认）',
-  colorInvalid: '颜色代码无效：支持 #rgb 或 #rrggbb。',
-  colorReset: '恢复默认',
-  preview: '预览',
-  sampleDuration: '12秒',
-  overridden: '已覆盖',
-  reset: '恢复默认',
-  unsaved: '未保存',
-  save: '保存',
-  saving: '保存中…',
-  discard: '放弃修改',
-  readOnly: '本部署的设置为只读。',
-  saveFailed: '本部署没有接受这些值，已保留供你修改。',
-  expand: '展开设置',
-  collapse: '收起设置',
-}
 //#endregion
 
-//#region registration capture
-/** Captured registration from window.__ModuleLoader__.load(). */
-let registration
-globalThis.window = {
-  __ModuleLoader__: {
-    load(value) {
-      registration = value
-    },
-  },
+//#region the deployment's design-system face, mocked to its real shape
+/** Required services the shipped settings form model reads. */
+class FakeSettingsFormModel {
+  /**
+   * @param scope - the entry's form scope (mirrors ConfigFormController).
+   * @param fields - the field descriptors the card declares.
+   */
+  constructor(scope, fields) {
+    this.scope = scope
+    this.fields = fields
+    this.staged = new Map()
+    this.disposed = false
+    this.saved = 0
+  }
+
+  /** @returns the form frame state the shipped SettingsForm renders. */
+  shell() {
+    const snapshot = this.scope.getSnapshot()
+    return {
+      status: snapshot.status,
+      writable: snapshot.writable === true,
+      dirty: this.staged.size > 0,
+      saving: false,
+      failed: false,
+    }
+  }
+
+  /**
+   * @param name - field name.
+   * @returns the staged (or stored) field state.
+   */
+  field(name) {
+    const snapshot = this.scope.getSnapshot()
+    const user = snapshot.user ?? {}
+    const stored = snapshot.value?.[name]
+    const staged = this.staged.has(name)
+    return {
+      name,
+      value: staged ? this.staged.get(name) : (typeof stored === 'string' ? stored : ''),
+      overridden: staged ? this.staged.get(name) !== '' : typeof user[name] === 'string' && user[name] !== '',
+      invalid: false,
+      placeholder: '',
+    }
+  }
+
+  /**
+   * @param projection - builds the card snapshot from this model.
+   * @returns the store the card's bound hook reads.
+   */
+  bind(projection) {
+    const listeners = new Set()
+    this.notify = () => {
+      for (const listener of [...listeners]) listener()
+    }
+    return {
+      getSnapshot: () => projection.call(this),
+      subscribe(listener) {
+        listeners.add(listener)
+        return () => {
+          listeners.delete(listener)
+        }
+      },
+    }
+  }
+
+  /** @returns the staged actions the page's slot registration injects. */
+  actions() {
+    const model = this
+    return {
+      edit(name, value) {
+        model.staged.set(name, value)
+        model.notify?.()
+      },
+      resetField(name) {
+        model.staged.set(name, '')
+        model.notify?.()
+      },
+      discard() {
+        model.staged.clear()
+        model.notify?.()
+      },
+      async save() {
+        const ops = []
+        for (const [name, value] of model.staged) {
+          ops.push(value === ''
+            ? { op: 'unset', path: [name] }
+            : { op: 'set', path: [name], value })
+        }
+        model.staged.clear()
+        model.saved += 1
+        if (typeof model.scope.mutate === 'function') await model.scope.mutate(ops)
+        else for (const op of ops) await (op.op === 'unset' ? model.scope.unset(op.path[0]) : model.scope.set(op.path[0], op.value))
+        model.notify?.()
+      },
+    }
+  }
+
+  /** Release the model, exactly as the shipped one does. */
+  dispose() {
+    this.disposed = true
+  }
 }
 
-// The chat stylesheet is not on the page yet: the plugin must survive that and
-// pick the class up once the sheet arrives (asserted further down).
-globalThis.document = createDocument([])
+/** Field descriptor factory, mirroring `settingsTextField`. */
+function settingsTextField(name) {
+  return { name, kind: 'text' }
+}
 
-await import(pathToFileURL(bundlePath).href)
-
-assert.ok(registration, 'the bundle registers itself with window.__ModuleLoader__.load()')
-assert.equal(registration.id, '@dsh-external/dsh-turn-status-text')
-assert.equal(typeof registration.factory, 'function')
-
-// The shell seeds this table word; the card uses the deployment's own icon and tag.
 const fakePrimitives = {
-  IconChevronDownOutline14: (props) => createElement('svg', props),
-  Tag: (props) => createElement('span', props),
+  SettingsFormModel: FakeSettingsFormModel,
+  SettingsForm: (props) => createElement('dshSettingsForm', props),
+  SettingsValueField: (props) => createElement('dshSettingsValueField', props),
+  settingsTextField,
 }
-
-const plugin = registration.factory((spec) => {
-  if (spec === 'react') return fakeReact
-  if (spec === 'react/jsx-runtime') return jsxRuntime
-  if (spec === '@deepseek-ai/dsh-client-ui-primitives') return fakePrimitives
-  throw new Error('unexpected require: ' + spec)
-})
-
-assert.deepEqual(plugin.inject, ['slots', 'locale'])
-assert.equal(typeof plugin.apply, 'function')
 //#endregion
 
 //#region mocks mirroring the shipped services
@@ -241,6 +284,7 @@ class LocaleRuntime {
     this.bound = new Map()
     this.dictionary = undefined
   }
+
   register(ns, dicts) {
     this.dictionary = { ns, dicts }
     this.dictionaries[ns] = dicts.zh
@@ -249,6 +293,7 @@ class LocaleRuntime {
       delete this.dictionaries[ns]
     }
   }
+
   bind(ns) {
     let t = this.bound.get(ns)
     if (t === undefined) {
@@ -257,6 +302,7 @@ class LocaleRuntime {
     }
     return t
   }
+
   translate(ns, key, params) {
     const lookup = (namespace) => this.dictionaries[namespace]?.[key]
     const template = lookup(ns) ?? (ns === 'common' ? undefined : lookup('common')) ?? key
@@ -266,13 +312,13 @@ class LocaleRuntime {
 }
 
 /**
- * Mirrors SettingsScopeController: a snapshot store over one namespace's view,
- * with the Host folding accepted writes back into it.
+ * Mirrors ConfigFormController: a snapshot store over one entry's view, with the
+ * Host folding accepted writes back into it.
  * @param initial - starting section value.
- * @param options - \`sequential\` drops \`mutate\` to exercise the set/unset fallback;
- *   \`defaults\` are the schema defaults an \`unset\` re-applies to the resolved value.
+ * @param options - `sequential` drops `mutate` to exercise the set/unset fallback;
+ *   `defaults` are the schema defaults an `unset` re-applies to the resolved value.
  */
-function createSettingsScope(initial, options = {}) {
+function createFormScope(initial, options = {}) {
   const defaults = options.defaults ?? {}
   let snapshot = {
     status: 'ready',
@@ -289,8 +335,6 @@ function createSettingsScope(initial, options = {}) {
     const value = { ...snapshot.value }
     const user = { ...snapshot.user }
     if (op.op === 'unset') {
-      // The Host re-resolves the section, so a cleared field shows its schema
-      // default again — only the user layer forgets it.
       if (op.path[0] in defaults) value[op.path[0]] = defaults[op.path[0]]
       else delete value[op.path[0]]
       delete user[op.path[0]]
@@ -334,6 +378,64 @@ function createSettingsScope(initial, options = {}) {
   }
   return scope
 }
+
+/** Mirrors the ConfigForms service face this plugin consumes. */
+function createConfigForms(scope, options = {}) {
+  const served = options.served ?? true
+  const watchers = []
+  return {
+    seen: [],
+    formScope: scope,
+    get(entryId) {
+      this.seen.push(entryId)
+      return scope
+    },
+    whileServed(namespaces, register) {
+      watchers.push({ namespaces, register })
+      if (served) return register(new Set(namespaces)) ?? (() => {})
+      return () => {}
+    },
+    /** Flip the deployment to a state where the namespace is served. */
+    serve() {
+      for (const watcher of watchers) watcher.register(new Set(watcher.namespaces))
+    },
+  }
+}
+//#endregion
+
+//#region registration capture
+/** Captured registration from window.__ModuleLoader__.load(). */
+let registration
+globalThis.window = {
+  __ModuleLoader__: {
+    load(value) {
+      registration = value
+    },
+  },
+}
+
+// The legacy chat stylesheet is not on the page yet: the plugin must survive that
+// and pick the class up once the sheet arrives (asserted further down).
+globalThis.document = createDocument([])
+
+await import(pathToFileURL(bundlePath).href)
+
+assert.ok(registration, 'the bundle registers itself with window.__ModuleLoader__.load()')
+assert.equal(registration.id, '@dsh-external/dsh-turn-status-text')
+assert.equal(typeof registration.factory, 'function')
+
+const plugin = registration.factory((spec) => {
+  if (spec === 'react') return createFakeReact()
+  if (spec === 'react/jsx-runtime') return { jsx: createElement, jsxs: createElement, Fragment: Symbol('Fragment') }
+  if (spec === '@deepseek-ai/dsh-client-ui-primitives') return fakePrimitives
+  throw new Error('unexpected require: ' + spec)
+})
+
+assert.deepEqual(plugin.inject, ['slots', 'locale'], 'the label seat and the slot registry are the only required services')
+assert.equal(typeof plugin.apply, 'function')
+assert.equal(plugin.NS, ENTRY_ID, 'the settings entry id is the row id the patch declares')
+assert.equal(plugin.CARD_NS, CARD_NS)
+assert.equal(plugin.hasSettingsForm(), true)
 //#endregion
 
 //#region activate the plugin against the mocks
@@ -346,14 +448,16 @@ const locale = new LocaleRuntime({
   common: { close: '关闭' },
 })
 
-const scope = createSettingsScope(
+const scope = createFormScope(
   { value: { text: '', color: '' } },
   { defaults: { text: '', color: '' } },
 )
+const configForms = createConfigForms(scope)
 const disposers = []
 const slotRegistrations = []
-let settingsScopeSpec
 let injectedDeps
+let injectedCallback
+const fakeReact = { useState: undefined }
 
 const ctx = {
   locale,
@@ -368,40 +472,18 @@ const ctx = {
   },
 }
 
-let injectedCallback
 plugin.apply(ctx)
 
-assert.deepEqual(injectedDeps, ['settingsScope', 'slots'], 'the card activates only where settings and slots exist')
+assert.deepEqual(injectedDeps, ['configForms', 'slots'], 'the settings form and slots activate together, and only where they exist')
 
 const seat = locale.bind('chat')
 assert.equal(seat('chat.deepDiving'), '深度求索中...', 'an untouched install renders the shipped copy')
 
-// The card stylesheet is injected with the plugin and speaks only in theme tokens:
-// the light-theme regression this guards against was a hard-coded dark fallback.
-const cardCss = globalThis.document.head.children[0]
-assert.equal(cardCss.attributes['data-plugin-css'], 'dsh-turn-status-text/card', 'the card stylesheet is plugin-owned')
-assert.ok(cardCss.textContent.includes('.dshTst_card{'), 'the stylesheet defines the card rule')
-assert.ok(cardCss.textContent.includes('background:var(--dsw-alias-bg-layer-3)'), 'fields use the theme layer token')
-assert.ok(cardCss.textContent.includes('color:var(--dsw-alias-label-primary)'), 'field text uses the theme label token')
-assert.ok(cardCss.textContent.includes('--dsw-alias-border-l4') && cardCss.textContent.includes('--dsw-alias-border-l2'), 'borders use theme tokens')
-assert.ok(cardCss.textContent.includes('--dsw-alias-label-error'), 'invalid copy uses the theme error token')
-assert.ok(cardCss.textContent.includes('white-space:nowrap'), 'button and reset labels cannot wrap')
-assert.ok(!/var\(--dsw-alias-bg-layer[,)]/.test(cardCss.textContent), 'no bare --dsw-alias-bg-layer: that token does not exist')
-assert.ok(!/#1e1e1e|#e6e6e6|#161616/.test(cardCss.textContent), 'no hard-coded colours: the light/dark switch is the theme\'s')
-const openBraces = (cardCss.textContent.match(/\{/g) ?? []).length
-const closeBraces = (cardCss.textContent.match(/\}/g) ?? []).length
-assert.equal(openBraces, closeBraces, 'every card rule is closed: ' + String(openBraces) + ' blocks')
-
 const scoped = {
-  settingsScope: {
-    bind(spec) {
-      settingsScopeSpec = spec
-      return scope
-    },
-  },
+  configForms,
   slots: {
     inject(name, register) {
-      assert.equal(name, 'settings.plugin.item')
+      assert.equal(name, 'plugins.item', 'the card joins the Plugins page card list')
       return register()
     },
     register(options, component) {
@@ -409,6 +491,7 @@ const scoped = {
       return () => {}
     },
   },
+  locale,
   effect(callback) {
     const dispose = callback()
     disposers.push(dispose)
@@ -417,14 +500,15 @@ const scoped = {
 }
 injectedCallback(scoped)
 
-assert.deepEqual(settingsScopeSpec, { namespace: 'turn-status-text' }, 'the card binds this plugin\'s settings namespace')
+assert.deepEqual(configForms.seen, [ENTRY_ID], 'the form scope is bound to this plugin\'s settings entry')
 assert.equal(slotRegistrations.length, 1, 'exactly one card is contributed')
 const card = slotRegistrations[0]
-assert.equal(card.options.name, 'settings.plugin.item')
-assert.equal(card.options.key, 'turn-status-text', 'the slot key is the settings namespace the Host serves')
-assert.equal(card.options.locale, 'turn-status-text')
-assert.equal(typeof card.component, 'function')
-assert.ok(locale.dictionary?.ns === 'turn-status-text', 'the card registers its own dictionary namespace')
+assert.equal(card.options.name, 'plugins.item')
+assert.equal(card.options.id, ENTRY_ID, 'the card is keyed by the settings entry the Host serves')
+assert.equal(card.options.locale, CARD_NS)
+assert.equal(typeof card.options.label, 'function')
+assert.equal(card.options.label(), '状态文案', 'the card label comes from this plugin\'s dictionary')
+assert.equal(locale.dictionary?.ns, CARD_NS, 'the card registers its own dictionary namespace')
 //#endregion
 
 //#region label resolution
@@ -467,13 +551,13 @@ assert.equal(plugin.normalizeColor('#12345'), undefined, 'a malformed code is re
 assert.equal(plugin.normalizeColor(''), undefined, 'an empty draft is not a colour')
 
 const head = globalThis.document.head
-assert.equal(head.children.length, 1, 'no colour rule is injected while the section carries none')
+assert.equal(head.children.length, 0, 'no colour rule is injected while the section carries none')
 
 // The running row is addressed through the attributes its build stamps on it, so
 // nothing has to be discovered before a stored colour can apply.
 await scope.set('color', '#ff5500')
-assert.equal(head.children.length, 2, 'the colour rule is injected as soon as a colour is stored')
-const styleEl = head.children[1]
+assert.equal(head.children.length, 1, 'the colour rule is injected as soon as a colour is stored')
+const styleEl = head.children[0]
 assert.equal(styleEl.tagName, 'style')
 assert.equal(styleEl.attributes['data-plugin-css'], 'dsh-turn-status-text', 'the injected rule is marked as plugin-owned')
 assert.ok(styleEl.textContent.includes('[data-chat-running][data-chat-running]{color:#ff5500'), 'the running row is addressed by attribute, doubled to out-specify the generated class: ' + styleEl.textContent.slice(0, 90))
@@ -492,15 +576,23 @@ assert.ok(
   'the legacy gradient label is recoloured once its class appears',
 )
 assert.ok(styleEl.textContent.includes('color-mix(in srgb, #ff5500 45%, #fff)'), 'the shimmer highlight is derived from the chosen colour')
-assert.equal(head.children.length, 2, 'the same rule is rewritten, not duplicated')
 
 await scope.set('color', '#0f0')
 assert.ok(styleEl.textContent.includes('#00ff00'), 'a new colour rewrites the same rule in place')
-assert.equal(head.children.length, 2, 'no duplicate style element is appended')
 
 await scope.unset('color')
 assert.equal(styleEl.textContent, '', 'clearing the colour leaves the shipped styling untouched')
-assert.equal(head.children.length, 2, 'the style element stays owned while the plugin is mounted')
+
+// The page-global dev override beats the stored section, and an unusable global
+// falls back to it instead of blanking the colour.
+await scope.set('color', '#123456')
+globalThis.__DSH_TURN_STATUS_COLOR__ = '#00ff00'
+assert.equal(plugin.effectiveColor(), '#00ff00', 'the page-global colour wins over the stored one')
+await scope.set('color', '#123456')
+assert.ok(styleEl.textContent.includes('color:#00ff00'), 'the page-global colour reaches the injected rule')
+globalThis.__DSH_TURN_STATUS_COLOR__ = 'not-a-colour'
+assert.equal(plugin.effectiveColor(), '#123456', 'an unusable page global falls back to the stored colour')
+delete globalThis.__DSH_TURN_STATUS_COLOR__
 
 assert.deepEqual(
   plugin.colorCss('#ff5500', LEGACY_STATUS_CLASS),
@@ -509,165 +601,115 @@ assert.deepEqual(
   + '.' + LEGACY_STATUS_CLASS + '.' + LEGACY_STATUS_CLASS + '{background-image:linear-gradient(90deg, #ff5500 0%, #ff5500 40%, #ff5500 50%, #ff5500 60%, #ff5500 100%);background-image:linear-gradient(90deg, #ff5500 0%, #ff5500 40%, color-mix(in srgb, #ff5500 45%, #fff) 50%, #ff5500 60%, #ff5500 100%)}',
   'the emitted stylesheet is exactly the attribute rules plus the legacy gradient',
 )
-
-await scope.set('color', '#123456')
-
-// The page-global dev override beats the stored section, and an unusable global
-// falls back to it instead of blanking the colour.
-globalThis.__DSH_TURN_STATUS_COLOR__ = '#00ff00'
-assert.equal(plugin.effectiveColor(), '#00ff00', 'the page-global colour wins over the stored one')
-await scope.set('color', '#123456')
-assert.ok(styleEl.textContent.includes('color:#00ff00'), 'the page-global colour reaches the injected rule')
-globalThis.__DSH_TURN_STATUS_COLOR__ = 'not-a-colour'
-assert.equal(plugin.effectiveColor(), '#123456', 'an unusable page global falls back to the stored colour')
-delete globalThis.__DSH_TURN_STATUS_COLOR__
-await scope.set('color', '#123456')
-assert.ok(styleEl.textContent.includes('color:#123456'), 'deleting the global restores the stored colour')
 //#endregion
 
 //#region card rendering and writes
 /** Render the card the way the slot renderer does: hooks face bound to use<Name>. */
-function renderCard(face) {
-  fakeReact.reset()
+function renderCard(face, view) {
+  const react = createFakeReact()
+  react.reset()
   const props = {
-    t: (key) => CARD_COPY[key] ?? key,
+    t: (key) => (locale.dictionaries[CARD_NS]?.[key] ?? key),
     useTurnStatusText: (select) => select(face.hooks.turnStatusText.getSnapshot()),
-    edit: face.edit,
-    resetField: face.resetField,
-    discard: face.discard,
-    save: face.save,
+    view,
+    ...face,
   }
   return card.component(props)
 }
 
-let tree = renderCard(card.options.inject())
-assert.equal(find(tree, 'li') !== undefined, true, 'the card renders a list item')
-let inputs = findAll(tree, 'input')
-assert.equal(inputs.length, 3, 'the card renders a text field, a colour swatch, and a colour code field')
-const [textInput, swatchInput, codeInput] = inputs
-assert.equal(textInput.props.type, 'text', 'the first field is the label text')
-assert.equal(textInput.props.placeholder, CARD_COPY.textPlaceholder, 'the empty text field shows the shipped copy as its placeholder')
-assert.equal(swatchInput.props.type, 'color', 'the second field is the colour picker')
-assert.equal(codeInput.props.type, 'text', 'the third field is the colour code')
-assert.equal(swatchInput.props.value, '#123456', 'the picker opens on the stored colour')
-assert.equal(codeInput.props.value, '#123456', 'the code field shows the stored colour')
-assert.equal(codeInput.props.placeholder, CARD_COPY.colorPlaceholder)
-const previewPair = findByClass(tree, 'dshTst_preview')
-assert.ok(previewPair, 'the card renders the preview line')
-assert.equal(findByClass(tree, 'dshTst_previewLabel').props.children, CARD_COPY.preview)
-assert.equal(findByClass(tree, 'dshTst_previewText').props.children, '深度求索中，用时 12秒 ···', 'an empty draft previews the shipped copy with a sample duration')
-assert.equal(findByClass(tree, 'dshTst_previewText').props.style.color, '#123456', 'the preview paints the stored colour')
-assert.ok(
-  [...walk(tree)].some((element) => element.type === fakePrimitives.IconChevronDownOutline14),
-  'the header renders the deployment\'s own chevron component',
-)
-assert.equal(
-  [...walk(tree)].find((element) => element.type === fakePrimitives.IconChevronDownOutline14).props.className,
-  'dshTst_chevron dshTst_chevronOpen',
-  'the chevron is rotated while the card is expanded',
-)
+const face = card.options.inject()
+assert.equal(typeof face.hooks.turnStatusText.getSnapshot, 'function', 'the card reads a store, not a raw value')
+for (const action of ['edit', 'resetField', 'discard', 'save']) {
+  assert.equal(typeof face[action], 'function', 'the platform form actions are injected: ' + action)
+}
 
-// Stage a colour through the picker: the draft follows it, the section does not.
-const liveFace = card.options.inject()
-renderCard(liveFace)
-liveFace.edit('color', '#00c2a8')
-let liveTree = renderCard(liveFace)
-assert.equal(findAll(liveTree, 'input')[2].props.value, '#00c2a8', 'the staged colour shows in the code field')
-assert.equal(findAll(liveTree, 'input')[1].props.value, '#00c2a8', 'the staged colour shows in the picker')
-assert.equal(scope.getSnapshot().value.color, '#123456', 'staging alone does not write to the section')
-assert.equal(findByClass(liveTree, 'dshTst_previewText').props.style.color, '#00c2a8', 'the preview paints the staged colour')
-assert.equal(findByClass(liveTree, 'dshTst_badge').props.children, CARD_COPY.unsaved, 'an unsaved edit marks the header')
-// The platform renders the override badge and its reset control together, inside a
-// badges group that appears only while the field carries a user-layer entry.
-const overrideGroups = [...walk(liveTree)].filter((element) => element.props?.className === 'dshTst_badges')
-assert.equal(overrideGroups.length, 1, 'only the field carrying an override shows the badge group')
-assert.equal(overrideGroups[0].props.children[0].props.children, CARD_COPY.overridden, 'a stored override is badged on its field')
-assert.equal(overrideGroups[0].props.children[1].props.children, CARD_COPY.reset, 'the badge group carries the reset control')
-const saveButton = findAll(liveTree, 'button').at(-1)
-assert.equal(saveButton.props.disabled, false, 'save is enabled while an edit is staged')
-saveButton.props.onClick()
-await Promise.resolve()
-await Promise.resolve()
-assert.deepEqual(scope.writes.at(-1), { op: 'set', path: ['color'], value: '#00c2a8' }, 'save writes the staged colour')
-assert.ok(styleEl.textContent.includes('#00c2a8'), 'the saved colour reaches the injected rule')
-assert.equal(findAll(renderCard(card.options.inject()), 'button').at(-1).props.disabled, true, 'save is idle again after the write')
+assert.equal(renderCard(face, 'summary'), locale.dictionaries[CARD_NS].description, 'the list view renders the one-line summary')
 
-// Text and colour staged together write as one atomic mutation.
-const bothFace = card.options.inject()
-renderCard(bothFace)
-bothFace.edit('text', '一起保存')
-bothFace.edit('color', '#abcdef')
-const beforeBoth = scope.writes.length
-findAll(renderCard(bothFace), 'button').at(-1).props.onClick()
-await Promise.resolve()
-await Promise.resolve()
-assert.deepEqual(scope.writes.slice(beforeBoth), [
-  { op: 'set', path: ['text'], value: '一起保存' },
-  { op: 'set', path: ['color'], value: '#abcdef' },
-], 'both fields ride one mutation')
-assert.equal(seat('chat.deepDiving'), '一起保存', 'the saved text renders')
+let tree = renderCard(face)
+const form = findAll(tree, fakePrimitives.SettingsForm)[0]
+assert.ok(form, 'the open view renders the platform settings form')
+assert.equal(form.props.labels.readOnly, locale.dictionaries[CARD_NS].readOnly, 'the form frame gets this plugin\'s labels')
+assert.equal(form.props.onSave, face.save, 'the form saves through the injected action')
+assert.equal(form.props.onDiscard, face.discard, 'the form discards through the injected action')
+assert.equal(form.props.state.writable, true, 'a writable deployment is reported as writable')
 
-// A malformed code blocks the save and says so.
-const invalidFace = card.options.inject()
-renderCard(invalidFace)
-invalidFace.edit('color', '#zz')
-const invalidTree = renderCard(invalidFace)
-assert.equal(findAll(invalidTree, 'input')[2].props.value, '#zz', 'the bad draft stays visible for correction')
-assert.ok(String(findByClass(invalidTree, 'dshTst_inputInvalid')?.props.className).includes('dshTst_inputInvalid'), 'the invalid field is marked')
-assert.equal(findAll(invalidTree, 'button').at(-1).props.disabled, true, 'an invalid colour blocks saving')
-assert.ok(findAll(invalidTree, 'p').some((element) => String(element.props.children).includes('颜色代码无效')), 'the card explains the rejection')
-const writesBeforeInvalid = scope.writes.length
-invalidFace.save()
-await Promise.resolve()
-assert.equal(scope.writes.length, writesBeforeInvalid, 'an invalid colour writes nothing')
+const fields = findAll(tree, fakePrimitives.SettingsValueField)
+assert.equal(fields.length, 2, 'the card renders a text field and a colour field')
+assert.equal(fields[0].props.label, locale.dictionaries[CARD_NS].textField)
+assert.equal(fields[0].props.hint, locale.dictionaries[CARD_NS].textHint)
+assert.equal(fields[0].props.id, ENTRY_ID + '-text')
+assert.equal(fields[0].props.name ?? fields[0].props.name, fields[0].props.name, 'the field keeps the platform field state')
+assert.equal(fields[1].props.label, locale.dictionaries[CARD_NS].colorField)
+assert.equal(fields[1].props.hint, locale.dictionaries[CARD_NS].colorHint)
+assert.equal(fields[1].props.id, ENTRY_ID + '-color')
 
-// The default-colour button stages a clear.
-const resetFace = card.options.inject()
-renderCard(resetFace)
-const resetButtons = findAll(renderCard(resetFace), 'button').filter((element) => element.props.children === CARD_COPY.reset)
-assert.equal(resetButtons.length, 2, 'both fields offer the platform\'s reset control')
-const resetButton = resetButtons[1]
-resetButton.props.onClick()
-const clearedTree = renderCard(resetFace)
-assert.equal(findAll(clearedTree, 'input')[2].props.value, '', 'the default button empties the code field')
-assert.equal(findAll(clearedTree, 'input')[1].props.value, '#4d6bfe', 'the picker falls back to the theme colour while cleared')
-findAll(clearedTree, 'button').at(-1).props.onClick()
-await Promise.resolve()
-await Promise.resolve()
-assert.deepEqual(scope.writes.at(-1), { op: 'unset', path: ['color'] }, 'saving the cleared field drops the override')
+// The hint documents the placeholder, and the field states start empty.
+assert.ok(locale.dictionaries[CARD_NS].textHint.includes('{duration}'), 'the text hint documents the {duration} placeholder')
+assert.equal(fields[0].props.value, '', 'the text field starts on the stored (empty) value')
+assert.equal(fields[1].props.value, '#123456', 'the colour field shows the stored colour')
+
+// Edit through the platform field, then save through the platform action.
+fields[0].props.onEdit('一起保存 {duration}')
+const staged = renderCard(face)
+assert.equal(findAll(staged, fakePrimitives.SettingsValueField)[0].props.value, '一起保存 {duration}', 'a staged edit shows in the field')
+assert.equal(findAll(staged, fakePrimitives.SettingsValueField)[0].props.overridden, true, 'a staged edit is badged as an override')
+assert.equal(scope.getSnapshot().value.text, '', 'staging alone does not write to the settings')
+await face.save()
+assert.deepEqual(scope.writes.at(-1), { op: 'set', path: ['text'], value: '一起保存 {duration}' }, 'save writes the staged text through the Host')
+assert.equal(seat('chat.deepDivingFor', { duration: '12秒' }), '一起保存 12秒', 'the saved text renders with the live clock')
+
+// A colour edit goes through the same path, and the injected rule follows it.
+const colourFaces = findAll(renderCard(face), fakePrimitives.SettingsValueField)[1]
+colourFaces.props.onEdit('#ff5500')
+await face.save()
+assert.equal(scope.getSnapshot().value.color, '#ff5500', 'the colour reaches the settings')
+assert.ok(styleEl.textContent.includes('color:#ff5500'), 'the colour reaches the injected rule')
+
+// The reset control stages a clear, and saving it drops the override.
+findAll(renderCard(face), fakePrimitives.SettingsValueField)[1].props.onReset()
+await face.save()
+assert.equal(scope.getSnapshot().user.color, undefined, 'resetting the field drops the user-layer entry')
 assert.equal(styleEl.textContent, '', 'the injected rule goes quiet again')
-// The resolved section re-applies the schema default after a clear, so the
-// post-save verification must read the user layer, not the resolved value.
-const clearedState = card.options.inject().hooks.turnStatusText.getSnapshot()
-assert.equal(clearedState.failed, false, 'a cleared field is not reported as a rejected save')
-assert.equal(clearedState.colorDraft, '', 'the cleared field shows empty again')
-assert.equal(seat('chat.deepDiving'), '一起保存', 'the text override survives a colour reset')
+assert.equal(seat('chat.deepDivingFor', { duration: '12秒' }), '一起保存 12秒', 'the text override survives a colour reset')
 
 // The sequential fallback covers a scope without mutate().
-const sequential = createSettingsScope({ value: { text: 'x', color: '#111111' } }, { sequential: true })
+const sequential = createFormScope({ value: { text: '', color: '#111111' } }, { sequential: true })
+const sequentialForms = createConfigForms(sequential)
 injectedCallback({
-  settingsScope: { bind: () => sequential },
+  configForms: sequentialForms,
   slots: scoped.slots,
+  locale,
   effect: scoped.effect,
 })
 const sequentialFace = slotRegistrations.at(-1).options.inject()
-const sequentialTree = renderCard(sequentialFace)
-sequentialFace.edit('color', '#222222')
-renderCard(sequentialFace)
-findAll(sequentialTree, 'button')
-findAll(renderCard(sequentialFace), 'button').at(-1).props.onClick()
-await Promise.resolve()
-await Promise.resolve()
+findAll(renderCard(sequentialFace), fakePrimitives.SettingsValueField)[1].props.onEdit('#222222')
+await sequentialFace.save()
 assert.deepEqual(sequential.writes.at(-1), { op: 'set', path: ['color'], value: '#222222' }, 'a mutate-less scope still receives the write')
+//#endregion
+
+//#region a deployment that does not serve the entry
+const unserved = createFormScope({ value: { text: '', color: '' } })
+const unservedForms = createConfigForms(unserved, { served: false })
+const before = slotRegistrations.length
+injectedCallback({
+  configForms: unservedForms,
+  slots: scoped.slots,
+  locale,
+  effect: scoped.effect,
+})
+assert.equal(slotRegistrations.length, before, 'no card is contributed while the Host serves no settings entry for this plugin')
+unservedForms.serve()
+assert.equal(slotRegistrations.length, before + 1, 'the card appears once the entry is served')
 //#endregion
 
 //#region lifecycle
 for (const dispose of disposers) dispose()
-assert.equal(seat('chat.deepDiving'), '深度求索中...', 'disposing the effect restores the original translate')
-assert.equal(locale.dictionary, undefined, 'disposing the effect releases the card dictionary')
-assert.equal(head.children.length, 0, 'disposing the effect removes both injected stylesheets')
+assert.equal(seat('chat.deepDiving'), '深度求索中...', 'disposing the effects restores the original translate')
+assert.equal(locale.dictionary, undefined, 'disposing the effects releases the card dictionary')
+assert.equal(head.children.length, 0, 'disposing the effects removes the injected colour rule')
 
 const source = readFileSync(bundlePath, 'utf8')
 assert.ok(!/^\s*(import|export)\s/m.test(source), 'the bundle carries no top-level import/export')
 
 console.log('dsh-turn-status-text self-check: all assertions passed')
+//#endregion

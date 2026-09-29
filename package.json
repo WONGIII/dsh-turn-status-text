@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-turn-status-text",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Custom text and colour for the DSH chat running-status line — the 「深度求索中，用时 12秒 ···」 row — configured from Settings → Plugins.",
   "private": true,
   "type": "module",

@@ -73,15 +73,19 @@ dsh plugin --profile <your profile> remove @dsh-external/dsh-turn-status-text
 
 ## How to configure
 
-**1. Configure it in the Plugins page (recommended)**: **sidebar → Plugins → open this plugin in the list → click that chevron title on the row (the `配置 @dsh-external/dsh-turn-status-text` button)** → two inputs: the custom text and the text colour → Save.
+**1. Configure it in the Plugins page (recommended)**: **sidebar → Plugins → open this plugin in the list → the configuration section is right under the title** (no need to open 包含的组件) → two inputs: the custom text and the text colour → Save.
 
-![The configuration page inside the Plugins page](docs/plugins-config.png)
+![The configuration section on the plugin's own page](docs/plugins-config.png)
+
+There is another way in: the same form also lives on the row inside "包含的组件" (click that row's chevron title, the `配置 @dsh-external/dsh-turn-status-text` button).
 
 > In 0.2.0-rc the plugin configuration is no longer under "Settings → Plugins → Configurable": that tab and the `settings.plugin.item` slot it dispatched do not exist in the new build.
-> The Plugins page now gives a configuration entry only to **rows that registered a configuration page**: the `plugins.row.config` slot, keyed `<package name>#<row id>`,
-> that is `@dsh-external/dsh-turn-status-text#dsh-turn-status-text` (the `rowConfigKey()` / `configure.has(row)` in `ui-plugin-manager`).
+> The Plugins page now collects configuration from two slots, and **each needs a registration before any entry appears**:
+> - `plugins.bundle.config` (key = the package name) → renders a configuration section under the plugin's own title, which is the screenshot above;
+> - `plugins.row.config` (key = `<package name>#<row id>`, i.e. `rowConfigKey()` in `ui-plugin-manager`) → gives that row inside "包含的组件" a page of its own (`configure.has(row)`).
+>
 > The values travel over the `configForms` service (`configForms.get(row id)`, guarded by `whileServed`), and the form is the platform's own
-> `SettingsFormModel` / `SettingsForm` / `SettingsValueField`, so this page looks exactly like the settings pages the deployment ships.
+> `SettingsFormModel` / `SettingsForm` / `SettingsValueField`, so both places look exactly like the settings pages the deployment ships.
 
 Both fields are `volatile()` fields on this row's Config, so a save takes effect **immediately — with neither a restart nor a page reload**.
 
@@ -151,26 +155,32 @@ and all three sides (the Host projection, the Plugins page form, the browser hal
 Both fields carry `volatile()`: `volatile` means "the value can be changed without remounting this row, and what you read is always the latest value",
 which is why the Plugins page puts it into an editable form; an empty-string default means "inherit" (the shipped copy / the theme colour).
 
-**But the settings section being served ≠ the Plugins page giving it an entry**: the Plugins page renders that chevron "Config" title only for rows that registered `plugins.row.config`,
-and the key has to be `<package name>#<row id>`. So this registration is the second thing the browser half has to do:
+**But the settings section being served ≠ the Plugins page giving it an entry**: the Plugins page only renders places that **registered a configuration slot** —
+the plugin's own page needs `plugins.bundle.config` (key = the package name), and the row inside "包含的组件" needs `plugins.row.config` (key = `<package name>#<row id>`).
+So registering this form into both slots is the second thing the browser half has to do:
 
 ```js
 const inject = ['slots', 'locale']                       // required services: just these two
 ctx.inject(['configForms', 'slots'], (scoped) => {       // settings form optional: without it the label override still works
   scope = scoped.configForms.get('dsh-turn-status-text')  // ConfigFormController: getSnapshot/ subscribe/ set/ mutate
   const card = new TurnStatusTextCardController(scope)    // wraps the platform's SettingsFormModel
-  scoped.configForms.whileServed([NS], () => scoped.slots.inject('plugins.row.config', () => scoped.slots.register({
-    name: 'plugins.row.config',
-    key: '@dsh-external/dsh-turn-status-text#dsh-turn-status-text',
-    locale: CARD_NS,
-    inject: () => card.inject(),                          // { hooks, edit, resetField, discard, save }
-  }, TurnStatusTextCard)))
+  scoped.configForms.whileServed([NS], () => {
+    for (const page of [
+      { slot: 'plugins.bundle.config', key: '@dsh-external/dsh-turn-status-text' },                    // the plugin's own page
+      { slot: 'plugins.row.config', key: '@dsh-external/dsh-turn-status-text#dsh-turn-status-text' },  // that row's page
+    ]) {
+      scoped.slots.inject(page.slot, () => scoped.slots.register({
+        name: page.slot, key: page.key, locale: CARD_NS,
+        inject: () => card.inject(),                      // { hooks, edit, resetField, discard, save }
+      }, TurnStatusTextCard))
+    }
+  })
 })
 ```
 
-`whileServed` is the guard the platform provides for "mount this page only when the Host really serves this settings entry": on a deployment that has not composed this row, the Plugins page shows no trace of it.
-The row configuration page calls the component with `view: 'page'` (the summary row in the row list is `view: 'summary'`), and the platform also passes a `form` (`{state, mutate}`) in;
-this plugin wraps its own `SettingsFormModel` (the same `configForms` scope), so staging / saving / discarding / resetting to default mean exactly what they mean on the settings pages the deployment ships.
+`whileServed` is the guard the platform provides for "mount these two places only when the Host really serves this settings entry": on a deployment that has not composed this row, the Plugins page shows no trace of them.
+Both call the component with `view: 'page'` (the summary row in the row list is `view: 'summary'`); the plugin's own page passes no `form`, the row page passes one (`{state, mutate}`).
+This plugin uses its own `SettingsFormModel` in both (the same `configForms` scope), so staging / saving / discarding / resetting to default mean exactly what they mean on the settings pages the deployment ships.
 
 ### Why the colour rule is written this way
 
@@ -230,7 +240,7 @@ node tools/hmr-probe.mjs 15
 colour normalization (`#ABC` → `#aabbcc`, `4d6bfe` → `#4d6bfe`, `red`/`#12345` rejected),
 the **exact CSS text** of both attribute selectors and of the legacy `_turnStatus` gradient rule, the page-global overrides and their fallback,
 the binding of `configForms.get(row id)`, the `whileServed` guard (no configuration page mounted when the settings entry is not served),
-the `plugins.row.config` slot and the `<package name>#<row id>` key, both the summary and the full-page view,
+both slots (`plugins.bundle.config` by package name, `plugins.row.config` by `<package name>#<row id>`), that each slot is claimed once, both the summary and the full-page view,
 the form state and the injection of the form actions, a field edit / reset to default landing in the settings through the platform form and rendering on the status line,
 a scope without `mutate` falling back to `set`/`unset`, and the style element and the dictionaries removed after cleanup.
 
@@ -286,8 +296,8 @@ OK: dsh-turn-status-text is served -> {"text":"","color":""}
 ), and then headless Chromium walked the real UI once:
 
 1. sidebar **Plugins** → open `@dsh-external/dsh-turn-status-text` in the plugin list;
-2. that row's title turns into a chevron button, `aria-label="配置 @dsh-external/dsh-turn-status-text"` (without the `plugins.row.config` registration it is plain text);
-3. click it → the page renders the two fields **自定义文字** / **文字颜色** (custom text / text colour);
+2. **the configuration section is right under the title** (`[data-plugin-config]`, no need to open "包含的组件"), with the two fields **自定义文字** / **文字颜色** (custom text / text colour);
+3. the row keeps a page of its own as well: its title is a chevron button, `aria-label="配置 @dsh-external/dsh-turn-status-text"` (without the `plugins.row.config` registration it is plain text);
 4. fill in `宝宝正在努力思考… {duration}` and `#ff5500`, click **Save**;
 5. back in the conversation, read the status line:
 
@@ -296,7 +306,7 @@ OK: dsh-turn-status-text is served -> {"text":"","color":""}
  "rowColor":"rgb(255, 85, 0)","deepDivingVar":"#ff5500","shimmerVar":"#ff5500"}
 ```
 
-The leading half is the `aria-live` announcement and the trailing half is the visible row; the configuration page is in `docs/plugins-config.png`.
+The leading half is the `aria-live` announcement and the trailing half is the visible row; the configuration section is in `docs/plugins-config.png` (since v0.1.3 it sits on the plugin's own page).
 In other words: **save in the Plugins page → the chat row renders with your text and colour at once**, with no page reload anywhere in the loop.
 
 ## Compatibility

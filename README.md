@@ -72,15 +72,19 @@ dsh plugin --profile <你的 profile> remove @dsh-external/dsh-turn-status-text
 
 ## 怎么改
 
-**1. 插件页里配置（推荐）**：**侧栏「插件」→ 在插件列表里点开本插件 → 点这一行那个带 › 的标题（即「配置 @dsh-external/dsh-turn-status-text」）** → 两个输入框：自定义文字、文字颜色 → 保存。
+**1. 插件页里配置（推荐）**：**侧栏「插件」→ 在插件列表里点开本插件 → 标题下面直接就是配置区**（不用点进「包含的组件」）→ 两个输入框：自定义文字、文字颜色 → 保存。
 
-![插件页里的配置页](docs/plugins-config.png)
+![插件页里的配置区](docs/plugins-config.png)
+
+想从别处进也行：同一份表单在「包含的组件」里那一行的页面里也有一份（点那一行带 › 的标题，即「配置 @dsh-external/dsh-turn-status-text」）。
 
 > 0.2.0-rc 的插件配置已经不在"设置 → 插件 → 可配置"里了：那个标签页与它 dispatch 的 `settings.plugin.item` 槽位在新版里已经不存在。
-> 现在插件页只给**注册了配置页的行**一个配置入口：`plugins.row.config` 槽位，key 是 `<包名>#<row id>`，
-> 也就是 `@dsh-external/dsh-turn-status-text#dsh-turn-status-text`（`ui-plugin-manager` 里的 `rowConfigKey()` / `configure.has(row)`）。
+> 现在插件页按两个槽位收配置，**都要注册才会出现入口**：
+> - `plugins.bundle.config`（key = 包名）→ 在插件自己的页面标题下渲染一块配置区，也就是上面那张图；
+> - `plugins.row.config`（key = `<包名>#<row id>`，即 `ui-plugin-manager` 里的 `rowConfigKey()`）→ 给「包含的组件」里那一行一个自己的页面（`configure.has(row)`）。
+>
 > 设置值走 `configForms` 服务（`configForms.get(row id)`，`whileServed` 守卫），表单用平台自己的
-> `SettingsFormModel` / `SettingsForm` / `SettingsValueField`，所以这一页和部署自带的设置页长得一模一样。
+> `SettingsFormModel` / `SettingsForm` / `SettingsValueField`，所以这两处和部署自带的设置页长得一模一样。
 
 两个字段都是这一行 Config 上的 `volatile()` 字段，保存后**立即生效，不用重启也不用刷新页面**。
 
@@ -150,26 +154,32 @@ Host 把 row 的 Config schema 投影成设置分区（`settings/describe` 里�
 两个字段都带 `volatile()`：`volatile` 是"值可以在不重新挂载这个 row 的前提下被改，并且读到的始终是最新值"，
 插件页因此把它放进可编辑表单；空串默认值表示"继承"（部署原文案 / 主题原色）。
 
-**但设置分区被提供 ≠ 插件页会给出入口**：插件页只给注册过 `plugins.row.config` 的行渲染那个带 › 的「配置」标题，
-key 必须是 `<包名>#<row id>`。所以浏览器半侧要做的第二件事就是这个注册：
+**但设置分区被提供 ≠ 插件页会给出入口**：插件页只渲染**注册过配置槽位**的地方——
+插件自己的页面要 `plugins.bundle.config`（key = 包名），「包含的组件」里那一行要 `plugins.row.config`（key = `<包名>#<row id>`）。
+所以浏览器半侧要做的第二件事就是把这份表单注册到这两个槽位：
 
 ```js
 const inject = ['slots', 'locale']                       // 必需服务：只有这两个
 ctx.inject(['configForms', 'slots'], (scoped) => {       // 设置表单可选：没有它标签覆盖照常工作
   scope = scoped.configForms.get('dsh-turn-status-text')  // ConfigFormController：getSnapshot/ subscribe/ set/ mutate
   const card = new TurnStatusTextCardController(scope)    // 包住平台的 SettingsFormModel
-  scoped.configForms.whileServed([NS], () => scoped.slots.inject('plugins.row.config', () => scoped.slots.register({
-    name: 'plugins.row.config',
-    key: '@dsh-external/dsh-turn-status-text#dsh-turn-status-text',
-    locale: CARD_NS,
-    inject: () => card.inject(),                          // { hooks, edit, resetField, discard, save }
-  }, TurnStatusTextCard)))
+  scoped.configForms.whileServed([NS], () => {
+    for (const page of [
+      { slot: 'plugins.bundle.config', key: '@dsh-external/dsh-turn-status-text' },                    // 插件自己的页面
+      { slot: 'plugins.row.config', key: '@dsh-external/dsh-turn-status-text#dsh-turn-status-text' },  // 那一行的页面
+    ]) {
+      scoped.slots.inject(page.slot, () => scoped.slots.register({
+        name: page.slot, key: page.key, locale: CARD_NS,
+        inject: () => card.inject(),                      // { hooks, edit, resetField, discard, save }
+      }, TurnStatusTextCard))
+    }
+  })
 })
 ```
 
-`whileServed` 是平台提供的"只在 Host 真的提供这个设置条目时才挂这一页"的守卫：没组合这一行的部署里，插件页看不到任何痕迹。
-行配置页会以 `view: 'page'` 调用组件（行列表里的摘要行是 `view: 'summary'`），平台同时还会传一个 `form`（`{state, mutate}`）进来；
-本插件用自己包好的 `SettingsFormModel`（同一份 `configForms` scope），因此暂存/保存/放弃/恢复默认的语义与部署自带设置页完全一致。
+`whileServed` 是平台提供的"只在 Host 真的提供这个设置条目时才挂这两页"的守卫：没组合这一行的部署里，插件页看不到任何痕迹。
+两处都以 `view: 'page'` 调用组件（行列表里的摘要行是 `view: 'summary'`），插件自己的页面那处不传 `form`、行页面那处会传一个 `form`（`{state, mutate}`）；
+本插件两处都用自己包好的 `SettingsFormModel`（同一份 `configForms` scope），因此暂存/保存/放弃/恢复默认的语义与部署自带设置页完全一致。
 
 ### 颜色规则为什么这样写
 
@@ -229,7 +239,7 @@ node tools/hmr-probe.mjs 15
 颜色归一化（`#ABC` → `#aabbcc`、`4d6bfe` → `#4d6bfe`、`red`/`#12345` 拒绝）、
 两个属性选择器与旧版 `_turnStatus` 渐变规则的**精确 CSS 文本**、页面全局覆盖与回退、
 `configForms.get(row id)` 的绑定、`whileServed` 守卫（没提供这个设置条目时不挂卡片）、
-`plugins.row.config` 的槽位与 `<包名>#<row id>` key、摘要/整页两种 view、
+`plugins.bundle.config`（包名）与 `plugins.row.config`（`<包名>#<row id>`）两个槽位、每个槽位只注入一次、摘要/整页两种 view、
 表单状态与动作的注入、字段编辑/恢复默认经平台表单保存后落到设置并渲染到状态行、
 没有 `mutate` 的 scope 退回 `set`/`unset`、清理后样式元素与词典都被移除。
 
@@ -284,8 +294,8 @@ OK: dsh-turn-status-text is served -> {"text":"","color":""}
 ），然后用 headless Chromium 走了一遍真实 UI：
 
 1. 侧栏 **插件** → 插件列表里点开 `@dsh-external/dsh-turn-status-text`；
-2. 该行标题变成带 › 的按钮，`aria-label="配置 @dsh-external/dsh-turn-status-text"`（没有 `plugins.row.config` 注册时它只是纯文本）；
-3. 点开 → 这一页渲染出 **自定义文字** / **文字颜色** 两个字段；
+2. **标题下方直接就是配置区**（`[data-plugin-config]`，无需进「包含的组件」），里面是 **自定义文字** / **文字颜色** 两个字段；
+3. 另外那一行仍然有自己的页面：行标题是带 › 的按钮，`aria-label="配置 @dsh-external/dsh-turn-status-text"`（没有 `plugins.row.config` 注册时它只是纯文本）；
 4. 填入 `宝宝正在努力思考… {duration}` 与 `#ff5500`，点 **保存**；
 5. 回到会话读状态行：
 
@@ -294,7 +304,7 @@ OK: dsh-turn-status-text is served -> {"text":"","color":""}
  "rowColor":"rgb(255, 85, 0)","deepDivingVar":"#ff5500","shimmerVar":"#ff5500"}
 ```
 
-前半段是 `aria-live` 播报、后半段是可见那行；配置页见 `docs/plugins-config.png`。
+前半段是 `aria-live` 播报、后半段是可见那行；配置区见 `docs/plugins-config.png`（v0.1.3 起就在插件自己的页面上）。
 也就是说：**从插件页保存 → 聊天区那行立刻按你的文字和颜色渲染**，全程不需要刷新。
 
 ## 兼容性

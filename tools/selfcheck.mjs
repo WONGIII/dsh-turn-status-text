@@ -16,7 +16,8 @@
  *     actions/dispose), the `SettingsForm` and `SettingsValueField` components,
  *     and `settingsTextField`. The model folds staged drafts into the scope on
  *     save, so a save can be followed all the way to the rendered label.
- *   - The slot renderer's contract: the row config registers into `plugins.row.config` keyed
+ *   - The slot renderer's contract: the configuration registers into `plugins.bundle.config`
+ *     (the plugin's own page) and `plugins.row.config` keyed
  *     `<package>#<row id>`, gets its `hooks` face bound as a
  *     `use<Name>` prop, and renders an element tree; the summary and page views are both exercised.
  *   - The chat stylesheet: the running row is styled by attributes
@@ -455,6 +456,11 @@ const scope = createFormScope(
   { defaults: { text: '', color: '' } },
 )
 const configForms = createConfigForms(scope)
+/** The Plugins page's configuration slots this plugin registers into. */
+const PAGE_SLOTS = ['plugins.bundle.config', 'plugins.row.config']
+/** Slots injected so far, to prove each is claimed once. */
+const injectedSlots = []
+
 const disposers = []
 const slotRegistrations = []
 let injectedDeps
@@ -485,7 +491,9 @@ const scoped = {
   configForms,
   slots: {
     inject(name, register) {
-      assert.equal(name, 'plugins.row.config', 'the card joins the Plugins page row-config slot')
+      assert.ok(PAGE_SLOTS.includes(name), 'the card joins a Plugins page configuration slot: ' + name)
+      assert.ok(!injectedSlots.includes(name), 'a slot is injected once: ' + name)
+      injectedSlots.push(name)
       return register()
     },
     register(options, component) {
@@ -503,12 +511,26 @@ const scoped = {
 injectedCallback(scoped)
 
 assert.deepEqual(configForms.seen, [ENTRY_ID], 'the form scope is bound to this plugin\'s settings entry')
-assert.equal(slotRegistrations.length, 1, 'exactly one card is contributed')
-const card = slotRegistrations[0]
-assert.equal(card.options.name, 'plugins.row.config')
-assert.equal(card.options.key, PACKAGE + '#' + ENTRY_ID, 'the row is keyed `<bundle package name>#<row id>`, which is what the Plugins page looks up')
-assert.equal(card.options.locale, CARD_NS)
+assert.deepEqual(injectedSlots, PAGE_SLOTS, 'both configuration entry points are registered: the plugin\'s own page and the row\'s page')
+assert.equal(slotRegistrations.length, 2, 'exactly two registrations are contributed')
+
+const ownPage = slotRegistrations.find((entry) => entry.options.name === 'plugins.bundle.config')
+assert.ok(ownPage, 'the plugin\'s own page gets a configuration section')
+assert.equal(ownPage.options.key, PACKAGE, 'a bundle section is keyed by the package name')
+assert.equal(ownPage.options.locale, CARD_NS)
+
+const rowPage = slotRegistrations.find((entry) => entry.options.name === 'plugins.row.config')
+assert.ok(rowPage, 'the row gets its own page too')
+assert.equal(rowPage.options.key, PACKAGE + '#' + ENTRY_ID, 'a row page is keyed `<bundle package name>#<row id>`, which is what the Plugins page looks up')
+assert.equal(rowPage.options.locale, CARD_NS)
 assert.equal(locale.dictionary?.ns, CARD_NS, 'the card registers its own dictionary namespace')
+
+// Both pages render the same card over the same form: whatever the page opens,
+// the fields and the actions come from one controller.
+assert.equal(typeof ownPage.options.inject, 'function')
+assert.equal(typeof rowPage.options.inject, 'function')
+assert.equal(ownPage.component, rowPage.component, 'one component serves both entry points')
+const card = ownPage
 //#endregion
 
 //#region label resolution
@@ -675,6 +697,7 @@ assert.equal(seat('chat.deepDivingFor', { duration: '12秒' }), '一起保存 12
 // The sequential fallback covers a scope without mutate().
 const sequential = createFormScope({ value: { text: '', color: '#111111' } }, { sequential: true })
 const sequentialForms = createConfigForms(sequential)
+injectedSlots.length = 0
 injectedCallback({
   configForms: sequentialForms,
   slots: scoped.slots,
@@ -691,15 +714,16 @@ assert.deepEqual(sequential.writes.at(-1), { op: 'set', path: ['color'], value: 
 const unserved = createFormScope({ value: { text: '', color: '' } })
 const unservedForms = createConfigForms(unserved, { served: false })
 const before = slotRegistrations.length
+injectedSlots.length = 0
 injectedCallback({
   configForms: unservedForms,
   slots: scoped.slots,
   locale,
   effect: scoped.effect,
 })
-assert.equal(slotRegistrations.length, before, 'no card is contributed while the Host serves no settings entry for this plugin')
+assert.equal(slotRegistrations.length, before, 'no page is contributed while the Host serves no settings entry for this plugin')
 unservedForms.serve()
-assert.equal(slotRegistrations.length, before + 1, 'the card appears once the entry is served')
+assert.equal(slotRegistrations.length, before + PAGE_SLOTS.length, 'both pages appear once the entry is served')
 //#endregion
 
 //#region lifecycle
